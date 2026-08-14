@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>gruntcmt — scenarios &amp; detail levels</title>
+<style>
+  :root{
+    --bg:#f6f8fa; --fg:#1f2328; --muted:#59636e; --border:#d1d9e0;
+    --canvas:#fff; --accent:#0969da; --green:#1a7f37; --red:#cf222e; --yellow:#9a6700;
+    --add-b:#1a7f37; --del-b:#cf222e; --rep:#8250df; --neutral:#eaeef2;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+  a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+  code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  header.page{max-width:900px;margin:0 auto;padding:32px 24px 4px}
+  header.page h1{font-size:25px;margin:0 0 6px}
+  header.page p{color:var(--muted);margin:6px 0;max-width:760px}
+  .wrap{max-width:900px;margin:0 auto;padding:8px 24px 80px}
+
+  .note{background:var(--canvas);border:1px solid var(--border);border-radius:10px;padding:14px 18px;margin:16px 0 8px;font-size:13px}
+  .note b{color:var(--fg)}
+  .note .lim{color:var(--muted)}
+
+  /* sticky detail switcher */
+  .switch{position:sticky;top:0;z-index:5;background:var(--bg);padding:14px 0 10px;margin:6px 0 4px;
+    display:flex;align-items:center;gap:12px;flex-wrap:wrap;border-bottom:1px solid var(--border)}
+  .switch .lbl{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+  .seg{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--canvas)}
+  .seg button{font:inherit;font-size:13px;border:0;background:transparent;padding:7px 14px;cursor:pointer;color:var(--muted);border-right:1px solid var(--border)}
+  .seg button:last-child{border-right:0}
+  .seg button.on{background:var(--accent);color:#fff;font-weight:600}
+  .switch .hint{font-size:12px;color:var(--muted)}
+
+  .scenario{margin:30px 0}
+  .scenario > h2{font-size:17px;margin:0 0 4px}
+  .scenario > .desc{color:var(--muted);margin:0 0 8px;max-width:760px}
+  .ctxline{font-size:12px;color:var(--muted);margin:0 0 10px}
+  .ctxline code{background:#eef1f4;border-radius:6px;padding:2px 7px}
+
+  .gh{background:var(--canvas);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+  .gh .gh-head{display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid var(--border);background:#f6f8fa;font-size:12px;color:var(--muted)}
+  .gh .gh-head .dot{width:20px;height:20px;border-radius:50%;background:#dbe0e6}
+  .gh .gh-head b{color:var(--fg)}
+  .gh .gh-body{padding:14px 18px}
+  .gh-body h3{font-size:16px;margin:2px 0 12px;line-height:1.3}
+  .gh-body table{border-collapse:collapse;margin:10px 0;font-size:13px}
+  .gh-body th,.gh-body td{border:1px solid var(--border);padding:6px 12px;text-align:left}
+  .gh-body th{background:#f6f8fa}
+  .gh-body td.n{text-align:right;font-variant-numeric:tabular-nums}
+  details{border:1px solid var(--border);border-radius:6px;margin:8px 0;background:#fff}
+  summary{cursor:pointer;padding:8px 12px;list-style:none;font-weight:600}
+  summary::-webkit-details-marker{display:none}
+  summary::before{content:"▸ ";color:var(--muted)} details[open]>summary::before{content:"▾ "}
+  .inner{padding:0 12px 10px}
+  details details{margin:6px 0}
+  pre.diff{background:#f6f8fa;border:1px solid var(--border);border-radius:6px;padding:10px 12px;overflow:auto;font-size:12.5px;line-height:1.5;margin:8px 0}
+  .a{color:var(--add-b)} .d{color:var(--del-b)} .u{color:var(--yellow)} .r{color:var(--rep)} .c{color:var(--muted)}
+  .sub{color:var(--muted);font-size:12px}
+  .marker{color:#8c959f;font-size:12px;background:#f6f8fa;border:1px dashed var(--border);border-radius:6px;padding:3px 8px;display:inline-block;margin:0 0 10px}
+  .callout{border-left:3px solid var(--red);background:#fff8f8;padding:8px 12px;border-radius:0 6px 6px 0;margin:10px 0}
+  .ok{color:var(--green)} .warn{color:var(--yellow)} .danger{color:var(--red)}
+
+  /* detail-level visibility, driven by body class */
+  .lv{display:none}
+  body.detail-resource .lv-resource{display:block}
+  body.detail-attribute .lv-attribute{display:block}
+  footer.page{max-width:900px;margin:0 auto;padding:20px 24px;color:var(--muted);font-size:12px}
+</style>
+</head>
+<body class="detail-resource">
+<header class="page">
+  <h1>gruntcmt — scenarios &amp; detail levels</h1>
+  <p>What <b>gruntcmt</b> emits for common terragrunt plans. Use the switch to see every scenario at each fidelity —
+     <code>summary</code>, <code>resource</code>, <code>attribute</code>. Same markdown works in a PR comment and the Actions job summary.</p>
+</header>
+
+<div class="wrap">
+
+  <div class="note">
+    <b>Two surfaces, your call.</b> The markdown goes to a <b>PR comment</b> (<span class="lim">≤ 65,536 chars</span>) or the
+    <b>Actions job summary</b> (<span class="lim">≤ 1 MiB</span>). You choose the fidelity that fits each:
+    <code>--detail attribute</code> for the roomy summary, <code>--detail summary</code>/<code>resource</code> for the comment.
+    gruntcmt renders exactly what you ask — no truncation, no magic.
+  </div>
+
+  <div class="switch">
+    <span class="lbl">Detail</span>
+    <div class="seg" id="seg">
+      <button data-lv="summary">summary</button>
+      <button data-lv="resource" class="on">resource</button>
+      <button data-lv="attribute">attribute</button>
+    </div>
+    <span class="hint" id="hint">addresses + actions — a good default for the PR comment</span>
+  </div>
+
+  <!-- ============ grouping depth ============ -->
+  <section class="scenario">
+    <h2>🗂️ Grouping depth — <code>--group-by N</code></h2>
+    <p class="desc">Unit names are <code>/</code>-paths. <code>N</code> = how many leading segments form the group key; deeper
+       segments flatten into the unit's label. One level of groups, units flat within. Same 4 units, three depths:</p>
+    <div class="gh"><div class="gh-body">
+      <table style="width:100%">
+        <tr>
+          <th style="width:33%"><code>--group-by 0</code> · flat</th>
+          <th style="width:33%"><code>--group-by 1</code> · by env (default)</th>
+          <th style="width:34%"><code>--group-by 2</code> · by env/layer</th>
+        </tr>
+        <tr style="vertical-align:top">
+          <td><pre class="diff" style="margin:0"><span class="c">(no groups)</span>
+production/database/primary
+production/database/replica
+production/networking
+staging/database/db1</pre></td>
+          <td><pre class="diff" style="margin:0"><span class="u">▾ production</span>
+    database/primary
+    database/replica
+    networking
+<span class="u">▾ staging</span>
+    database/db1</pre></td>
+          <td><pre class="diff" style="margin:0"><span class="u">▾ production/database</span>
+    primary
+    replica
+<span class="u">▾ production/networking</span>
+    networking
+<span class="u">▾ staging/database</span>
+    db1</pre></td>
+        </tr>
+      </table>
+      <p class="sub" style="margin:8px 0 0">Higher <code>N</code> = more, finer groups. <code>N=0</code> = one flat list. A unit
+         shorter than <code>N</code> just groups on its whole path as a singleton. Summary-table rows = these groups.</p>
+    </div></div>
+  </section>
+
+  <!-- ============ 1. additions ============ -->
+  <section class="scenario">
+    <h2>🟢 Additions</h2>
+    <p class="desc">New resources only. Green headline.</p>
+    <p class="ctxline"><code>gruntcmt --scope networking --detail <span class="lvname">resource</span></code></p>
+    <div class="gh"><div class="gh-head"><span class="dot"></span> <b>github-actions</b> · via gruntcmt</div>
+      <div class="gh-body">
+        <span class="marker">&lt;!-- gruntcmt:scope=networking --&gt;</span>
+        <h3>🟢 Terragrunt plan — <code>networking</code> · 0 destroy · 4 add · 0 change</h3>
+        <table>
+          <tr><th>Unit</th><th>Add</th><th>Change</th><th>Destroy</th></tr>
+          <tr><td><code>networking/vpc</code></td><td class="n">3</td><td class="n">0</td><td class="n">0</td></tr>
+          <tr><td><code>networking/dns</code></td><td class="n">1</td><td class="n">0</td><td class="n">0</td></tr>
+        </table>
+        <div class="lv lv-resource">
+          <details open><summary><code>networking/vpc</code> — 3 add</summary><div class="inner"><pre class="diff"><span class="a">+ aws_subnet.private[0]        # create</span>
+<span class="a">+ aws_subnet.private[1]        # create</span>
+<span class="a">+ aws_route_table.private      # create</span></pre></div></details>
+          <details open><summary><code>networking/dns</code> — 1 add</summary><div class="inner"><pre class="diff"><span class="a">+ aws_route53_record.api        # create</span></pre></div></details>
+        </div>
+        <div class="lv lv-attribute">
+          <details open><summary><code>networking/vpc</code> — 3 add</summary><div class="inner"><pre class="diff"><span class="a">+ aws_subnet.private[0]</span>
+<span class="a">    + cidr_block = "10.0.1.0/24"</span>
+<span class="a">    + vpc_id     = (known after apply)</span>
+<span class="a">+ aws_subnet.private[1]</span>
+<span class="a">    + cidr_block = "10.0.2.0/24"</span>
+<span class="a">+ aws_route_table.private</span>
+<span class="a">    + vpc_id     = (known after apply)</span></pre></div></details>
+          <details open><summary><code>networking/dns</code> — 1 add</summary><div class="inner"><pre class="diff"><span class="a">+ aws_route53_record.api</span>
+<span class="a">    + name = "api.example.com"</span>
+<span class="a">    + type = "A"</span></pre></div></details>
+        </div>
+        <p class="sub">gruntcmt · terraform 1.9.5 · commit a1b2c3d</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 2. updates ============ -->
+  <section class="scenario">
+    <h2>🟡 Updates</h2>
+    <p class="desc">In-place changes only.</p>
+    <p class="ctxline"><code>gruntcmt --scope staging --detail <span class="lvname">resource</span></code></p>
+    <div class="gh"><div class="gh-head"><span class="dot"></span> <b>github-actions</b> · via gruntcmt</div>
+      <div class="gh-body">
+        <span class="marker">&lt;!-- gruntcmt:scope=staging --&gt;</span>
+        <h3>🟡 Terragrunt plan — <code>staging</code> · 0 destroy · 0 add · 3 change</h3>
+        <table>
+          <tr><th>Unit</th><th>Add</th><th>Change</th><th>Destroy</th></tr>
+          <tr><td><code>staging/eks</code></td><td class="n">0</td><td class="n">2</td><td class="n">0</td></tr>
+          <tr><td><code>staging/database/db1</code></td><td class="n">0</td><td class="n">1</td><td class="n">0</td></tr>
+        </table>
+        <div class="lv lv-resource">
+          <details open><summary><code>staging/eks</code> — 2 change</summary><div class="inner"><pre class="diff"><span class="u">~ aws_eks_node_group.default   # update</span>
+<span class="u">~ aws_launch_template.eks      # update</span></pre></div></details>
+          <details open><summary><code>staging/database/db1</code> — 1 change</summary><div class="inner"><pre class="diff"><span class="u">~ aws_db_instance.db1          # update</span></pre></div></details>
+        </div>
+        <div class="lv lv-attribute">
+          <details open><summary><code>staging/eks</code> — 2 change</summary><div class="inner"><pre class="diff"><span class="u">~ aws_eks_node_group.default</span>
+<span class="u">    ~ scaling_config.desired_size = 3 -&gt; 5</span>
+<span class="u">    ~ labels.tier                = "a" -&gt; "b"</span>
+<span class="u">~ aws_launch_template.eks</span>
+<span class="u">    ~ user_data = (known after apply)</span></pre></div></details>
+          <details open><summary><code>staging/database/db1</code> — 1 change</summary><div class="inner"><pre class="diff"><span class="u">~ aws_db_instance.db1</span>
+<span class="u">    ~ allocated_storage = 100 -&gt; 200</span>
+<span class="c">      password          = (sensitive value)</span></pre></div></details>
+        </div>
+        <p class="sub">gruntcmt · terraform 1.9.5 · commit a1b2c3d</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 3. destroys across environments ============ -->
+  <section class="scenario">
+    <h2>🔴 Destroys across environments</h2>
+    <p class="desc">A whole PR funneled in, grouped by top path segment. Production (with a destroy) sorts to the top; staging no-op folds away.</p>
+    <p class="ctxline"><code>cat *.ndjson | gruntcmt --scope infra --group-by 1 --detail <span class="lvname">resource</span></code></p>
+    <div class="gh"><div class="gh-head"><span class="dot"></span> <b>github-actions</b> · via gruntcmt</div>
+      <div class="gh-body">
+        <span class="marker">&lt;!-- gruntcmt:scope=infra --&gt;</span>
+        <h3>🔴 Terragrunt plan — <b>7 units</b> · 2 destroy · 12 add · 4 change</h3>
+        <table>
+          <tr><th>Environment</th><th>Units</th><th>Add</th><th>Change</th><th>Destroy</th><th></th></tr>
+          <tr><td><code>production</code></td><td class="n">4</td><td class="n">9</td><td class="n">3</td><td class="n">2</td><td class="danger">⚠️ <b>destroys</b></td></tr>
+          <tr><td><code>development</code></td><td class="n">2</td><td class="n">3</td><td class="n">1</td><td class="n">0</td><td class="ok">✅</td></tr>
+          <tr><td><code>staging</code></td><td class="n">1</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="sub">➖ no-op</td></tr>
+        </table>
+        <div class="callout">⚠️ <b>2 destructive changes</b> — review carefully.</div>
+        <div class="lv lv-resource">
+          <details open><summary>🔴 <code>production</code> — 4 units · 2 destroy</summary><div class="inner">
+            <details open><summary><code>production/database/primary</code> — ⚠️ 1 replace</summary><div class="inner"><pre class="diff"><span class="r">-/+ aws_db_instance.primary     # replace</span></pre></div></details>
+            <details><summary><code>production/cache</code> — ⚠️ 1 destroy</summary><div class="inner"><pre class="diff"><span class="d">- aws_elasticache_cluster.legacy  # destroy</span></pre></div></details>
+            <details><summary><code>production/networking</code> — 5 add, 2 change</summary><div class="inner"><pre class="diff"><span class="a">+ aws_subnet.private[2]         # create</span>
+<span class="u">~ aws_route_table.private       # update</span></pre></div></details>
+          </div></details>
+          <details><summary>🟢 <code>development</code> — 2 units · 3 add</summary><div class="inner"><pre class="diff"><span class="a">+ aws_instance.bastion          # create</span></pre></div></details>
+          <details><summary>➖ <code>staging</code> — 1 unit · no changes</summary><div class="inner"><p class="sub">No changes.</p></div></details>
+        </div>
+        <div class="lv lv-attribute">
+          <details open><summary>🔴 <code>production</code> — 4 units · 2 destroy</summary><div class="inner">
+            <details open><summary><code>production/database/primary</code> — ⚠️ 1 replace</summary><div class="inner"><pre class="diff"><span class="r">-/+ aws_db_instance.primary</span>
+<span class="u">    ~ engine_version    = "14.7" -&gt; "15.4"  </span><span class="d"># forces replacement</span>
+<span class="u">    ~ allocated_storage = 100 -&gt; 200</span>
+<span class="c">      password          = (sensitive value)</span></pre></div></details>
+            <details><summary><code>production/cache</code> — ⚠️ 1 destroy</summary><div class="inner"><pre class="diff"><span class="d">- aws_elasticache_cluster.legacy</span>
+<span class="d">    - node_type = "cache.r6g.large"</span></pre></div></details>
+            <details><summary><code>production/networking</code> — 5 add, 2 change</summary><div class="inner"><pre class="diff"><span class="a">+ aws_subnet.private[2]</span>
+<span class="a">    + cidr_block = "10.0.3.0/24"</span>
+<span class="u">~ aws_route_table.private</span>
+<span class="u">    ~ route[1].cidr_block = "0.0.0.0/0" -&gt; "10.0.0.0/8"</span></pre></div></details>
+          </div></details>
+          <details><summary>🟢 <code>development</code> — 2 units · 3 add</summary><div class="inner"><pre class="diff"><span class="a">+ aws_instance.bastion</span>
+<span class="a">    + instance_type = "t3.micro"</span></pre></div></details>
+          <details><summary>➖ <code>staging</code> — 1 unit · no changes</summary><div class="inner"><p class="sub">No changes.</p></div></details>
+        </div>
+        <p class="sub">gruntcmt · terraform 1.9.5 · commit a1b2c3d</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 4. no changes ============ -->
+  <section class="scenario">
+    <h2>➖ No changes</h2>
+    <p class="desc">Everything up to date — identical at every detail level. Still update-in-place, so a prior red comment gets replaced.</p>
+    <p class="ctxline"><code>gruntcmt --scope networking --detail <span class="lvname">resource</span></code></p>
+    <div class="gh"><div class="gh-head"><span class="dot"></span> <b>github-actions</b> · via gruntcmt</div>
+      <div class="gh-body">
+        <span class="marker">&lt;!-- gruntcmt:scope=networking --&gt;</span>
+        <h3>➖ Terragrunt plan — <code>networking</code> · no changes</h3>
+        <p>2 units planned, all up to date. ✅</p>
+        <p class="sub">gruntcmt · terraform 1.9.5 · commit a1b2c3d</p>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<footer class="page">
+  Design mockup for gruntcmt — rendering approximates GitHub's markdown. See
+  <code>docs/superpowers/specs/2026-08-14-gruntcmt-design.md</code>.
+</footer>
+
+<script>
+  var hints = {
+    summary:   "counts only — headline + table, always tiny",
+    resource:  "addresses + actions — a good default for the PR comment",
+    attribute: "full before→after per attribute — best for the job summary"
+  };
+  document.querySelectorAll('#seg button').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var lv = btn.getAttribute('data-lv');
+      document.body.className = 'detail-' + lv;
+      document.querySelectorAll('#seg button').forEach(function(b){ b.classList.toggle('on', b===btn); });
+      document.getElementById('hint').textContent = hints[lv];
+      document.querySelectorAll('.lvname').forEach(function(s){ s.textContent = lv; });
+    });
+  });
+</script>
+</body>
+</html>
