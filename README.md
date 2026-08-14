@@ -85,7 +85,7 @@ cat staging.ndjson | gruntcmt --scope staging --detail resource > staging-commen
 | `--input` | `""` (auto) | Force input mode: `auto`, `wrapped`, or `plan`. |
 | `--commit` | `""` | Commit SHA stamped in the footer for currency. |
 | `--config` | `""` | Explicit config file; skips discovery. |
-| `--no-config` | `false` | Ignore all config files (reproducible CI). |
+| `--no-config` | `false` | Ignore all config files (CLI flags still apply); reproducible CI. |
 | `--print-config` | `false` | Print resolved config to stderr and exit. |
 | `--version` | `false` | Print version and exit. |
 
@@ -178,8 +178,8 @@ is replaced wholesale by the last layer that sets it, not merged key-by-key.
 
 ### PR comment — post or update in place
 
-`gruntcmt` always emits `<!-- gruntcmt:scope=<scope> -->` as line 1. Use `gh` to
-post or update the comment using that marker:
+`gruntcmt` always emits `<!-- gruntcmt:scope=<scope> -->` as line 1, serving as a
+stable marker. Use `gh api` to post or update the comment using that marker:
 
 ```yaml
 - name: Generate plan comment
@@ -193,13 +193,24 @@ post or update the comment using that marker:
       | gruntcmt --scope production --detail resource --commit "$GITHUB_SHA" \
       > /tmp/comment.md
 
-    gh pr comment "${{ github.event.pull_request.number }}" \
-      --edit-last-if-matches '<!-- gruntcmt:scope=production -->' \
-      --body-file /tmp/comment.md
+    MARKER='<!-- gruntcmt:scope=production -->'
+    PR="${{ github.event.pull_request.number }}"
+    # Find an existing comment carrying our marker
+    ID=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
+          --jq ".[] | select(.body | contains(\"$MARKER\")) | .id" | head -n1)
+    if [ -n "$ID" ]; then
+      # Update the existing comment in place
+      gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$ID" \
+        -f body="$(cat /tmp/comment.md)"
+    else
+      # First run: create the comment
+      gh pr comment "$PR" --body-file /tmp/comment.md
+    fi
 ```
 
-Each scope has its own marker, so multiple pipelines posting to the same PR never
-collide. Re-runs update the existing comment in place.
+The marker `<!-- gruntcmt:scope=<scope> -->` is what enables update-in-place
+detection. Each scope has its own marker, so multiple pipelines posting to the
+same PR never collide. Re-runs update the existing comment in place.
 
 ### Job summary — full attribute diff
 
@@ -229,15 +240,17 @@ Output is GitHub-flavored markdown. Top to bottom:
    rendered GitHub views).
 2. **Headline** — severity emoji, title, scope, unit count, destroy/add/change
    totals.
-3. **Summary table** — one row per group: Group | Units | Add | Change | Destroy |
-   status. Always shown at every fidelity.
+3. **Summary table** — one row per group: Group | Units | Add | Change | Destroy.
+   Always shown at every fidelity.
 4. **Destructive callout** — highlighted when any destroys exist.
 5. **Grouped details** (`resource`/`attribute`) — one collapsible `<details>` per
    group, nesting one `<details>` per unit with a diff-fenced body.
-6. **Drift / output-change callouts** — when `resource_drift` or `output_changes`
-   are present.
-7. **Load-error callout** — when any unit failed to parse.
-8. **Footer** — `gruntcmt · terraform <version> · commit <sha>`.
+6. **Load-error callout** — when any unit failed to parse.
+7. **Footer** — `gruntcmt · terraform <version> · commit <sha>`.
+
+**Not in v1 output:** Resource drift and output changes are parsed into the
+analysis model but are not yet rendered in the markdown output; rendering them is
+roadmap.
 
 ## Links
 
