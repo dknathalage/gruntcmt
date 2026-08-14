@@ -67,7 +67,11 @@ func Render(r analyze.Report, s config.Settings) string {
 	b.WriteString("\n")
 
 	if r.Totals.Destroy > 0 {
-		fmt.Fprintf(&b, "⚠️ **%d destructive changes** — review carefully.\n\n", r.Totals.Destroy)
+		noun := "changes"
+		if r.Totals.Destroy == 1 {
+			noun = "change"
+		}
+		fmt.Fprintf(&b, "⚠️ **%d destructive %s** — review carefully.\n\n", r.Totals.Destroy, noun)
 	}
 
 	for _, g := range r.Groups {
@@ -92,6 +96,8 @@ func Render(r analyze.Report, s config.Settings) string {
 
 func renderGroup(b *strings.Builder, g analyze.Group, s config.Settings) {
 	// summary fidelity groups contribute only to the table.
+	// NOTE: The blank lines surrounding inner/outer <details> tags are required
+	// for GitHub to render nested folds as block-level elements, not inline text.
 	anyDetail := false
 	for _, u := range g.Units {
 		if u.Detail != plan.FidelitySummary {
@@ -142,5 +148,12 @@ func renderAttr(b *strings.Builder, a plan.AttributeChange) {
 	if a.ForcesNew {
 		suffix = "  # forces replacement"
 	}
-	fmt.Fprintf(b, "    ~ %s = %s%s\n", a.Path, val, suffix)
+	glyph := "~"
+	switch a.Kind {
+	case plan.AttrAdd:
+		glyph = "+"
+	case plan.AttrRemove:
+		glyph = "-"
+	}
+	fmt.Fprintf(b, "    %s %s = %s%s\n", glyph, a.Path, val, suffix)
 }
