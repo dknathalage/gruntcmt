@@ -100,9 +100,12 @@ func Merge(layers ...File) File {
 		if l.Render.Title != "" {
 			out.Render.Title = l.Render.Title
 		}
+		// Emoji map is replaced wholesale by the last layer that sets it (not per-key merged).
 		if l.Render.Emoji != nil {
 			out.Render.Emoji = l.Render.Emoji
 		}
+		// HideUnchanged and FoldNoop are ADDITIVE by design: once any layer sets one true, it stays true.
+		// Plain bool has no unset sentinel; disabling at a deeper layer is intentionally unsupported.
 		if l.Render.HideUnchanged {
 			out.Render.HideUnchanged = true
 		}
