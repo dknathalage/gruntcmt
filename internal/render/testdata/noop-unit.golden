@@ -1,0 +1,25 @@
+<!-- gruntcmt:scope=noop-unit-test -->
+### 🟢 Terragrunt plan — `noop-unit-test` · 2 units · 0 destroy · 1 add · 0 change
+
+| Group | Units | Add | Change | Destroy | |
+|---|---|---|---|---|---|
+| `staging` | 2 | 1 | 0 | 0 | ✅ |
+
+<details><summary><code>staging</code> — 2 units</summary>
+
+<details><summary><code>staging/api</code></summary>
+
+```diff
++ aws_lambda_function.api
+```
+</details>
+
+<details><summary><code>staging/idle</code> — no changes</summary>
+
+No changes.
+
+</details>
+
+</details>
+
+<sub>gruntcmt · terraform 1.9.5</sub>

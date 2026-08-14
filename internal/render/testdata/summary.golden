@@ -1,0 +1,10 @@
+<!-- gruntcmt:scope=infra -->
+### 🔴 Terragrunt plan — `infra` · 1 units · 1 destroy · 1 add · 0 change
+
+| Group | Units | Add | Change | Destroy | |
+|---|---|---|---|---|---|
+| `production` | 1 | 1 | 0 | 1 | ⚠️ **destroys** |
+
+⚠️ **1 destructive change** — review carefully.
+
+<sub>gruntcmt · terraform 1.9.5</sub>

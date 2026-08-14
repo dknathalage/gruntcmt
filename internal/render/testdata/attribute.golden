@@ -1,0 +1,22 @@
+<!-- gruntcmt:scope=infra -->
+### 🔴 Terragrunt plan — `infra` · 1 units · 1 destroy · 1 add · 0 change
+
+| Group | Units | Add | Change | Destroy | |
+|---|---|---|---|---|---|
+| `production` | 1 | 1 | 0 | 1 | ⚠️ **destroys** |
+
+⚠️ **1 destructive change** — review carefully.
+
+<details><summary><code>production</code> — 1 units</summary>
+
+<details><summary><code>production/db</code></summary>
+
+```diff
+-/+ aws_db_instance.primary
+    ~ engine_version = 14.7 -> 15.4  # forces replacement
+```
+</details>
+
+</details>
+
+<sub>gruntcmt · terraform 1.9.5</sub>

@@ -1,0 +1,14 @@
+{
+  "format_version": "1.2",
+  "terraform_version": "1.9.5",
+  "resource_changes": [
+    { "address": "aws_db_instance.primary", "change": {
+      "actions": ["update"],
+      "before": {"engine_version": "14.7", "allocated_storage": 100, "name": "db"},
+      "after":  {"engine_version": "15.4", "allocated_storage": 200, "name": "db", "password": "x"},
+      "after_unknown": {"arn": true},
+      "after_sensitive": {"password": true},
+      "replace_paths": [["engine_version"]]
+    } }
+  ]
+}
