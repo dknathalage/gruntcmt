@@ -44,6 +44,28 @@ func actionGlyph(a plan.Action) string {
 	}
 }
 
+// groupStatusCell returns the status cell string for a group row.
+func groupStatusCell(g analyze.Group) string {
+	if g.Counts.Destroy > 0 {
+		return "⚠️ **destroys**"
+	}
+	if g.Severity == 0 {
+		return "➖ no-op"
+	}
+	return "✅"
+}
+
+// unitSeverity returns the max severity across all changes in a unit.
+func unitSeverity(u plan.Unit) int {
+	sev := 0
+	for _, c := range u.Changes {
+		if s := c.Action.Severity(); s > sev {
+			sev = s
+		}
+	}
+	return sev
+}
+
 func Render(r analyze.Report, s config.Settings) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "<!-- gruntcmt:scope=%s -->\n", r.Scope)
@@ -51,18 +73,26 @@ func Render(r analyze.Report, s config.Settings) string {
 	if title == "" {
 		title = "Terragrunt plan"
 	}
-	fmt.Fprintf(&b, "### %s %s — `%s` · %d destroy · %d add · %d change\n\n",
-		headEmoji(r, s), title, r.Scope, r.Totals.Destroy, r.Totals.Add, r.Totals.Change)
 
-	// summary table
-	b.WriteString("| Group | Units | Add | Change | Destroy |\n|---|---|---|---|---|\n")
+	// Compute total unit count across all groups.
+	totalUnits := 0
+	for _, g := range r.Groups {
+		totalUnits += len(g.Units)
+	}
+
+	// Finding 1: headline includes N units.
+	fmt.Fprintf(&b, "### %s %s — `%s` · %d units · %d destroy · %d add · %d change\n\n",
+		headEmoji(r, s), title, r.Scope, totalUnits, r.Totals.Destroy, r.Totals.Add, r.Totals.Change)
+
+	// Finding 2: summary table with trailing status column (6 columns).
+	b.WriteString("| Group | Units | Add | Change | Destroy | |\n|---|---|---|---|---|---|\n")
 	for _, g := range r.Groups {
 		key := g.Key
 		if key == "" {
 			key = "(all)"
 		}
-		fmt.Fprintf(&b, "| `%s` | %d | %d | %d | %d |\n",
-			key, len(g.Units), g.Counts.Add, g.Counts.Change, g.Counts.Destroy)
+		fmt.Fprintf(&b, "| `%s` | %d | %d | %d | %d | %s |\n",
+			key, len(g.Units), g.Counts.Add, g.Counts.Change, g.Counts.Destroy, groupStatusCell(g))
 	}
 	b.WriteString("\n")
 
@@ -107,13 +137,31 @@ func renderGroup(b *strings.Builder, g analyze.Group, s config.Settings) {
 	if !anyDetail {
 		return
 	}
+
+	// Finding 3: fold-noop — entire no-op group renders as a collapsed one-liner.
+	if s.Render.FoldNoop && g.Severity == 0 {
+		fmt.Fprintf(b, "<details><summary>➖ <code>%s</code> — %d units · no changes</summary>\n\nNo changes.\n\n</details>\n\n", g.Key, len(g.Units))
+		return
+	}
+
 	fmt.Fprintf(b, "<details><summary><code>%s</code> — %d units</summary>\n\n", g.Key, len(g.Units))
 	for _, u := range g.Units {
 		if u.Detail == plan.FidelitySummary {
 			continue
 		}
+
+		// Finding 3: fold-noop — no-op unit renders as a collapsed one-liner.
+		if s.Render.FoldNoop && unitSeverity(u) == 0 {
+			fmt.Fprintf(b, "<details><summary><code>%s</code> — no changes</summary>\n\n</details>\n\n", u.Name)
+			continue
+		}
+
 		fmt.Fprintf(b, "<details><summary><code>%s</code></summary>\n\n```diff\n", u.Name)
 		for _, c := range u.Changes {
+			// Finding 4: skip no-op and read resources (they are noise).
+			if c.Action == plan.ActionNoOp || c.Action == plan.ActionRead {
+				continue
+			}
 			fmt.Fprintf(b, "%s %s\n", actionGlyph(c.Action), c.Address)
 			if u.Detail == plan.FidelityAttribute {
 				for _, a := range c.Attributes {

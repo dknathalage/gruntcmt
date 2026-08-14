@@ -110,3 +110,59 @@ func TestRenderGoldenExtras(t *testing.T) {
 		t.Errorf("mismatch\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
 }
+
+// foldNoopReport has two groups: one with real changes (severity > 0) and one no-op group (severity == 0).
+func foldNoopReport() analyze.Report {
+	active := plan.Unit{
+		Name: "prod/app", TerraformVersion: "1.9.5", Detail: plan.FidelityResource,
+		Counts: plan.Counts{Add: 1},
+		Changes: []plan.ResourceChange{{
+			Address: "aws_instance.web", Action: plan.ActionCreate,
+		}},
+	}
+	noop := plan.Unit{
+		Name: "prod/cache", TerraformVersion: "1.9.5", Detail: plan.FidelityResource,
+		Counts: plan.Counts{NoOp: 1},
+		Changes: []plan.ResourceChange{{
+			Address: "aws_elasticache_cluster.c", Action: plan.ActionNoOp,
+		}},
+	}
+	activeGroup := analyze.Group{
+		Key:      "prod/app",
+		Units:    []plan.Unit{active},
+		Counts:   active.Counts,
+		Severity: 2,
+	}
+	noopGroup := analyze.Group{
+		Key:      "prod/cache",
+		Units:    []plan.Unit{noop},
+		Counts:   noop.Counts,
+		Severity: 0,
+	}
+	return analyze.Report{
+		Scope: "fold-test", Title: "Terragrunt plan", TerraformVersion: "1.9.5",
+		Groups:   []analyze.Group{activeGroup, noopGroup},
+		Totals:   plan.Counts{Add: 1, NoOp: 1},
+		Severity: 2,
+	}
+}
+
+func TestRenderGoldenFoldNoop(t *testing.T) {
+	s := config.Settings{}
+	s.Render.FoldNoop = true
+
+	got := Render(foldNoopReport(), s)
+	golden := filepath.Join("testdata", "fold-noop.golden")
+	if *update {
+		os.MkdirAll("testdata", 0o755)
+		os.WriteFile(golden, []byte(got), 0o644)
+		return
+	}
+	want, err := os.ReadFile(golden)
+	if err != nil {
+		t.Fatalf("read golden: %v (run -update first)", err)
+	}
+	if got != string(want) {
+		t.Errorf("mismatch\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}

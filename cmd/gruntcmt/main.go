@@ -90,13 +90,36 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		s.Detail, s.DetailSet = f, true
 	}
 
+	// Resolve input mode string before --print-config so it is available.
+	resolvedInput := pick(*inputMode, merged.Input)
+	if resolvedInput == "" {
+		resolvedInput = "auto"
+	}
+	s.Input = resolvedInput
+
 	if *printConfig {
-		fmt.Fprintf(stderr, "%+v\n", s)
+		detailName := "resource"
+		switch s.Detail {
+		case plan.FidelitySummary:
+			detailName = "summary"
+		case plan.FidelityAttribute:
+			detailName = "attribute"
+		}
+		fmt.Fprintf(stderr, "scope:          %s\n", s.Scope)
+		fmt.Fprintf(stderr, "name:           %s\n", s.Name)
+		fmt.Fprintf(stderr, "group-by:       %d\n", s.GroupBy)
+		fmt.Fprintf(stderr, "detail:         %s\n", detailName)
+		fmt.Fprintf(stderr, "input:          %s\n", s.Input)
+		fmt.Fprintf(stderr, "commit:         %s\n", s.Commit)
+		fmt.Fprintf(stderr, "render.title:        %s\n", s.Render.Title)
+		fmt.Fprintf(stderr, "render.hide-unchanged: %v\n", s.Render.HideUnchanged)
+		fmt.Fprintf(stderr, "render.fold-noop:      %v\n", s.Render.FoldNoop)
+		fmt.Fprintf(stderr, "overrides:      %d entries\n", len(s.Overrides))
 		return 0
 	}
 
 	mode := input.ModeAuto
-	switch pick(*inputMode, merged.Input) {
+	switch resolvedInput {
 	case "", "auto":
 		mode = input.ModeAuto
 	case "wrapped":

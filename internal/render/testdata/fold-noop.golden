@@ -1,0 +1,26 @@
+<!-- gruntcmt:scope=fold-test -->
+### 🟢 Terragrunt plan — `fold-test` · 2 units · 0 destroy · 1 add · 0 change
+
+| Group | Units | Add | Change | Destroy | |
+|---|---|---|---|---|---|
+| `prod/app` | 1 | 1 | 0 | 0 | ✅ |
+| `prod/cache` | 1 | 0 | 0 | 0 | ➖ no-op |
+
+<details><summary><code>prod/app</code> — 1 units</summary>
+
+<details><summary><code>prod/app</code></summary>
+
+```diff
++ aws_instance.web
+```
+</details>
+
+</details>
+
+<details><summary>➖ <code>prod/cache</code> — 1 units · no changes</summary>
+
+No changes.
+
+</details>
+
+<sub>gruntcmt · terraform 1.9.5</sub>

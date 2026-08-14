@@ -1,6 +1,9 @@
 package plan
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"sort"
+)
 
 func boolMap(raw json.RawMessage) map[string]bool {
 	out := map[string]bool{}
@@ -72,9 +75,16 @@ func diffAttrs(ch tfChange) ([]AttributeChange, int) {
 		keys[k] = true
 	}
 
+	// Sort keys for deterministic attribute order.
+	keySlice := make([]string, 0, len(keys))
+	for k := range keys {
+		keySlice = append(keySlice, k)
+	}
+	sort.Strings(keySlice)
+
 	var attrs []AttributeChange
 	unchanged := 0
-	for k := range keys {
+	for _, k := range keySlice {
 		b, hasB := before[k]
 		a, hasA := after[k]
 		isUnknown := unknown[k]
