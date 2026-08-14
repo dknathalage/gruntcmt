@@ -1,0 +1,8 @@
+{
+  "format_version": "1.2",
+  "terraform_version": "1.9.5",
+  "resource_changes": [
+    { "address": "aws_db_instance.primary", "change": { "actions": ["delete", "create"], "before": {"engine_version": "14.7"}, "after": {"engine_version": "15.4"}, "replace_paths": [["engine_version"]] } },
+    { "address": "aws_s3_bucket.logs", "change": { "actions": ["no-op"] } }
+  ]
+}
