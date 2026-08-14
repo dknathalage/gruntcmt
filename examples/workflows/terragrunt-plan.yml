@@ -1,0 +1,47 @@
+# Example consumer workflow. Copy into .github/workflows/ in your infra repo.
+# It plans your terragrunt units and posts a gruntcmt summary as a PR comment
+# (updated in place via the marker) plus the Actions job summary.
+#
+# Adapt the "Plan" step to your repo: the only contract the gruntcmt action needs
+# is a wrapped-NDJSON file — one {"name","plan"} object per unit.
+name: terragrunt-plan
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write   # required to create/update the PR comment
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Provide OpenTofu + terragrunt. This example pins them in
+      # examples/terragrunt/mise.toml; swap for setup-opentofu / asdf / etc.
+      - uses: jdx/mise-action@v2
+        with:
+          install: "false"
+      - name: Install tofu + terragrunt
+        working-directory: examples/terragrunt
+        run: mise install
+
+      # Plan every unit and build gruntcmt's NDJSON input. In your repo this is
+      # your own per-unit `terragrunt show -json | jq -c '{name,plan}'` loop.
+      - name: Plan -> NDJSON
+        working-directory: examples/terragrunt
+        run: |
+          eval "$(mise activate bash)"
+          ./plan-to-ndjson.sh > "$GITHUB_WORKSPACE/plans.ndjson"
+
+      # Summarize: lean PR comment (resource) + full job summary (attribute).
+      - uses: dknathalage/gruntcmt@v1
+        with:
+          ndjson: plans.ndjson
+          scope: infra
+          config: examples/terragrunt/.gruntcmt.yaml
+          # detail: resource          # PR comment fidelity (default)
+          # summary-detail: attribute # job summary fidelity (default)
+          # gruntcmt-version: v0.2.0   # pin the tool; default is latest
