@@ -15,6 +15,29 @@ own state.
 go install github.com/dknathalage/gruntcmt/cmd/gruntcmt@latest
 ```
 
+Ensure your Go bin directory is on `PATH` (e.g. `export PATH="$(go env GOBIN):$(go env GOPATH)/bin:$PATH"`).
+
+### Install with mise
+
+`gruntcmt` installs cleanly via [mise](https://mise.jdx.dev)'s Go backend — mise
+provides the Go toolchain and builds the binary, so there is no separate
+prerequisite. Pin it per-project alongside your Go version:
+
+```toml
+# mise.toml
+[tools]
+go = "1.24.13"
+"go:github.com/dknathalage/gruntcmt/cmd/gruntcmt" = "latest"
+```
+
+```bash
+mise install                                                  # build + install
+mise use -g "go:github.com/dknathalage/gruntcmt/cmd/gruntcmt@latest"  # or globally
+mise upgrade gruntcmt                                         # update
+```
+
+Pin a specific release by replacing `latest` with a tag (e.g. `v0.1.1`).
+
 ## Input Contract
 
 stdin carries Terraform plan JSON in one of two forms, auto-detected (override with

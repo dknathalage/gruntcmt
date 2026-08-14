@@ -17,6 +17,26 @@ func TestRunVersion(t *testing.T) {
 	}
 }
 
+func TestResolveVersionPrefersLdflags(t *testing.T) {
+	orig := version
+	defer func() { version = orig }()
+	version = "v9.9.9"
+	if got := resolveVersion(); got != "v9.9.9" {
+		t.Fatalf("resolveVersion() = %q, want v9.9.9", got)
+	}
+}
+
+func TestResolveVersionDevFallbackNonEmpty(t *testing.T) {
+	orig := version
+	defer func() { version = orig }()
+	version = "dev"
+	// Under `go test`, build info Main.Version is typically "" or "(devel)",
+	// so this exercises the fallback path and must never return empty.
+	if got := resolveVersion(); got == "" {
+		t.Fatal("resolveVersion() returned empty string")
+	}
+}
+
 func TestRunEndToEndBarePlan(t *testing.T) {
 	const p = `{"format_version":"1.2","terraform_version":"1.9.5","resource_changes":[{"address":"aws_s3_bucket.b","change":{"actions":["create"]}}]}`
 	var out, errBuf bytes.Buffer
