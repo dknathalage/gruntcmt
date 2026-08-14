@@ -199,6 +199,34 @@ is replaced wholesale by the last layer that sets it, not merged key-by-key.
 
 ## GitHub Actions
 
+### Reusable action (easiest)
+
+This repo ships a composite action. Give it a wrapped-NDJSON file and a scope; it
+installs `gruntcmt`, writes the job summary, and creates/updates the PR comment in
+place:
+
+```yaml
+permissions:
+  contents: read
+  pull-requests: write
+
+steps:
+  - uses: actions/checkout@v4
+  # ... produce plans.ndjson: one {"name","plan"} line per unit ...
+  - uses: dknathalage/gruntcmt@v1
+    with:
+      ndjson: plans.ndjson
+      scope: infra
+      config: examples/terragrunt/.gruntcmt.yaml   # optional
+      # detail: resource          # PR comment fidelity (default)
+      # summary-detail: attribute # job summary fidelity (default)
+      # gruntcmt-version: v0.2.0  # pin the tool (default: latest)
+```
+
+See [`examples/`](examples/) for a runnable terragrunt project and a full
+[`workflows/terragrunt-plan.yml`](examples/workflows/terragrunt-plan.yml). If you'd
+rather wire the steps yourself, the raw recipes follow.
+
 ### PR comment — post or update in place
 
 `gruntcmt` always emits `<!-- gruntcmt:scope=<scope> -->` as line 1, serving as a

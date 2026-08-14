@@ -1,0 +1,8 @@
+# Terragrunt / OpenTofu working artifacts — never committed.
+.terragrunt-cache/
+*.tfplan
+*.tfstate
+*.tfstate.backup
+.terraform/
+.terraform.lock.hcl
+*.bak

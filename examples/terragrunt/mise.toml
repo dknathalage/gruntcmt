@@ -1,0 +1,5 @@
+# Tools for running this example locally or in CI. `mise install` here gives you
+# OpenTofu + terragrunt at the versions this example was verified against.
+[tools]
+opentofu = "1.12.3"
+terragrunt = "1.0.8"

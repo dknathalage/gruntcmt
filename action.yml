@@ -1,0 +1,98 @@
+name: "gruntcmt plan summary"
+description: "Summarize Terraform/terragrunt plan JSON into a GitHub PR comment (updated in place) and the Actions job summary."
+author: "dknathalage"
+branding:
+  icon: "message-square"
+  color: "purple"
+
+inputs:
+  ndjson:
+    description: 'Path to gruntcmt wrapped-NDJSON input: one {"name","plan"} object per line (produce it from your per-unit `terragrunt show -json | jq -c ...`).'
+    required: true
+  scope:
+    description: "Scope label and marker key. One PR comment per scope, updated in place across re-runs."
+    required: true
+  detail:
+    description: "Fidelity for the PR comment: summary | resource | attribute."
+    required: false
+    default: "resource"
+  summary-detail:
+    description: "Fidelity for the Actions job summary."
+    required: false
+    default: "attribute"
+  group-by:
+    description: "Leading path segments to group units by."
+    required: false
+    default: "1"
+  config:
+    description: "Optional path to a .gruntcmt.yaml config file."
+    required: false
+    default: ""
+  commit:
+    description: "Commit SHA stamped in the footer."
+    required: false
+    default: ${{ github.sha }}
+  post-comment:
+    description: "Post/update the PR comment (only takes effect on pull_request events)."
+    required: false
+    default: "true"
+  job-summary:
+    description: "Write the summary to $GITHUB_STEP_SUMMARY."
+    required: false
+    default: "true"
+  gruntcmt-version:
+    description: "gruntcmt version to install via `go install ...@<version>`."
+    required: false
+    default: "latest"
+  go-version:
+    description: "Go version used to build gruntcmt."
+    required: false
+    default: "1.24"
+  github-token:
+    description: "Token used to create/update the PR comment."
+    required: false
+    default: ${{ github.token }}
+
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/setup-go@v5
+      with:
+        go-version: ${{ inputs.go-version }}
+
+    - name: Install gruntcmt
+      shell: bash
+      run: |
+        go install "github.com/dknathalage/gruntcmt/cmd/gruntcmt@${{ inputs.gruntcmt-version }}"
+        echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+    - name: Job summary
+      if: ${{ inputs.job-summary == 'true' }}
+      shell: bash
+      run: |
+        args=(--scope "${{ inputs.scope }}" --group-by "${{ inputs.group-by }}" \
+              --detail "${{ inputs.summary-detail }}" --commit "${{ inputs.commit }}")
+        [ -n "${{ inputs.config }}" ] && args+=(--config "${{ inputs.config }}")
+        gruntcmt "${args[@]}" < "${{ inputs.ndjson }}" >> "$GITHUB_STEP_SUMMARY"
+
+    - name: PR comment (create or update in place)
+      if: ${{ inputs.post-comment == 'true' && github.event_name == 'pull_request' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        args=(--scope "${{ inputs.scope }}" --group-by "${{ inputs.group-by }}" \
+              --detail "${{ inputs.detail }}" --commit "${{ inputs.commit }}")
+        [ -n "${{ inputs.config }}" ] && args+=(--config "${{ inputs.config }}")
+        gruntcmt "${args[@]}" < "${{ inputs.ndjson }}" > gruntcmt-comment.md
+
+        MARKER="<!-- gruntcmt:scope=${{ inputs.scope }} -->"
+        PR="${{ github.event.pull_request.number }}"
+        ID=$(gh api "repos/${{ github.repository }}/issues/${PR}/comments" --paginate \
+              --jq ".[] | select(.body | contains(\"$MARKER\")) | .id" | head -n1)
+        if [ -n "$ID" ]; then
+          gh api -X PATCH "repos/${{ github.repository }}/issues/comments/$ID" \
+            -f body="$(cat gruntcmt-comment.md)"
+        else
+          gh pr comment "$PR" --body-file gruntcmt-comment.md
+        fi

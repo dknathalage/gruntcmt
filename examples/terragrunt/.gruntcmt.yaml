@@ -1,0 +1,17 @@
+# Example gruntcmt config for this terragrunt project. Discovered automatically by
+# walking up from the CWD, or pass explicitly with --config.
+group-by: 1                 # group units by first path segment (environment)
+detail: resource            # default fidelity
+
+render:
+  title: "Terragrunt plan"
+  fold-noop: true           # collapse no-op units/groups to a one-line summary
+  hide-unchanged: true      # collapse unchanged attributes to a count (attribute fidelity)
+
+overrides:
+  # Any database unit is high-risk — always show full attribute diffs.
+  - path: "**/database*"
+    detail: attribute
+  # Show all of production at attribute fidelity (last matching override wins).
+  - path: "production/**"
+    detail: attribute
