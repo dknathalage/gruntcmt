@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime/debug"
 
 	"github.com/dknathalage/gruntcmt/internal/analyze"
 	"github.com/dknathalage/gruntcmt/internal/config"
@@ -13,7 +14,22 @@ import (
 	"github.com/dknathalage/gruntcmt/internal/render"
 )
 
+// version is overridable at build time via -ldflags "-X main.version=...".
+// When unset ("dev"), resolveVersion falls back to the module version
+// embedded by `go install`/`go build` so releases self-report their tag.
 var version = "dev"
+
+func resolveVersion() string {
+	if version != "dev" {
+		return version
+	}
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		if v := bi.Main.Version; v != "" && v != "(devel)" {
+			return v
+		}
+	}
+	return version
+}
 
 func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("gruntcmt", flag.ContinueOnError)
@@ -34,7 +50,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if *showVersion {
-		fmt.Fprintf(stdout, "gruntcmt %s\n", version)
+		fmt.Fprintf(stdout, "gruntcmt %s\n", resolveVersion())
 		return 0
 	}
 
