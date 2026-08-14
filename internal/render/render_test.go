@@ -4,6 +4,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/dknathalage/gruntcmt/internal/analyze"
@@ -144,6 +145,64 @@ func foldNoopReport() analyze.Report {
 		Groups:   []analyze.Group{activeGroup, noopGroup},
 		Totals:   plan.Counts{Add: 1, NoOp: 1},
 		Severity: 2,
+	}
+}
+
+// noopUnitReport has two units in one group: one with real changes and one
+// that is entirely no-op.  FoldNoop is OFF (the default), so the no-op unit
+// must render as a "no changes" one-liner rather than an empty diff block.
+func noopUnitReport() analyze.Report {
+	active := plan.Unit{
+		Name: "staging/api", TerraformVersion: "1.9.5", Detail: plan.FidelityResource,
+		Counts: plan.Counts{Add: 1},
+		Changes: []plan.ResourceChange{{
+			Address: "aws_lambda_function.api", Action: plan.ActionCreate,
+		}},
+	}
+	noop := plan.Unit{
+		Name: "staging/idle", TerraformVersion: "1.9.5", Detail: plan.FidelityResource,
+		Counts: plan.Counts{NoOp: 2},
+		Changes: []plan.ResourceChange{
+			{Address: "aws_s3_bucket.assets", Action: plan.ActionNoOp},
+			{Address: "data.aws_iam_policy.read", Action: plan.ActionRead},
+		},
+	}
+	g := analyze.Group{
+		Key:      "staging",
+		Units:    []plan.Unit{active, noop},
+		Counts:   plan.Counts{Add: 1},
+		Severity: 2,
+	}
+	return analyze.Report{
+		Scope: "noop-unit-test", Title: "Terragrunt plan", TerraformVersion: "1.9.5",
+		Groups:   []analyze.Group{g},
+		Totals:   plan.Counts{Add: 1, NoOp: 2},
+		Severity: 2,
+	}
+}
+
+func TestRenderGoldenNoopUnit(t *testing.T) {
+	// FoldNoop is deliberately false (default) to exercise the regression path.
+	s := config.Settings{}
+	s.Render.FoldNoop = false
+
+	got := Render(noopUnitReport(), s)
+	golden := filepath.Join("testdata", "noop-unit.golden")
+	if *update {
+		os.MkdirAll("testdata", 0o755)
+		os.WriteFile(golden, []byte(got), 0o644)
+		return
+	}
+	want, err := os.ReadFile(golden)
+	if err != nil {
+		t.Fatalf("read golden: %v (run -update first)", err)
+	}
+	if got != string(want) {
+		t.Errorf("mismatch\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+	// Explicit guard: no empty diff block must appear in the output.
+	if strings.Contains(got, "```diff\n```") {
+		t.Errorf("output contains empty diff block:\n%s", got)
 	}
 }
 

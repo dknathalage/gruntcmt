@@ -44,6 +44,17 @@ func actionGlyph(a plan.Action) string {
 	}
 }
 
+// hasRenderable reports whether the unit has at least one change that would
+// be written into the diff block (i.e. not NoOp or Read).
+func hasRenderable(u plan.Unit) bool {
+	for _, c := range u.Changes {
+		if c.Action != plan.ActionNoOp && c.Action != plan.ActionRead {
+			return true
+		}
+	}
+	return false
+}
+
 // groupStatusCell returns the status cell string for a group row.
 func groupStatusCell(g analyze.Group) string {
 	if g.Counts.Destroy > 0 {
@@ -153,6 +164,13 @@ func renderGroup(b *strings.Builder, g analyze.Group, s config.Settings) {
 		// Finding 3: fold-noop — no-op unit renders as a collapsed one-liner.
 		if s.Render.FoldNoop && unitSeverity(u) == 0 {
 			fmt.Fprintf(b, "<details><summary><code>%s</code> — no changes</summary>\n\n</details>\n\n", u.Name)
+			continue
+		}
+
+		// If every change is no-op/read, emit a "no changes" one-liner instead
+		// of an empty diff block (regardless of FoldNoop setting).
+		if !hasRenderable(u) {
+			fmt.Fprintf(b, "<details><summary><code>%s</code> — no changes</summary>\n\nNo changes.\n\n</details>\n\n", u.Name)
 			continue
 		}
 
