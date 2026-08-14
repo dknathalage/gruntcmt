@@ -43,8 +43,29 @@ func TestRunEmptyStdinFails(t *testing.T) {
 func TestRunDetailFlagOverridesToSummary(t *testing.T) {
 	const p = `{"format_version":"1.2","terraform_version":"1.9.5","resource_changes":[{"address":"aws_s3_bucket.b","change":{"actions":["update"]}}]}`
 	var out, errBuf bytes.Buffer
-	run([]string{"--scope", "x", "--name", "a", "--detail", "summary"}, strings.NewReader(p), &out, &errBuf)
+	code := run([]string{"--scope", "x", "--name", "a", "--detail", "summary"}, strings.NewReader(p), &out, &errBuf)
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errBuf.String())
+	}
 	if strings.Contains(out.String(), "```diff") {
 		t.Errorf("summary detail should emit no diff block:\n%s", out.String())
+	}
+}
+
+func TestRunInvalidDetailFlagFails(t *testing.T) {
+	const p = `{"format_version":"1.2","terraform_version":"1.9.5","resource_changes":[{"address":"aws_s3_bucket.b","change":{"actions":["create"]}}]}`
+	var out, errBuf bytes.Buffer
+	code := run([]string{"--scope", "x", "--name", "a", "--detail", "bogus"}, strings.NewReader(p), &out, &errBuf)
+	if code == 0 {
+		t.Fatalf("expected non-zero exit for invalid --detail")
+	}
+}
+
+func TestRunInvalidInputModeFails(t *testing.T) {
+	const p = `{"format_version":"1.2","terraform_version":"1.9.5","resource_changes":[{"address":"aws_s3_bucket.b","change":{"actions":["create"]}}]}`
+	var out, errBuf bytes.Buffer
+	code := run([]string{"--scope", "x", "--name", "a", "--input", "bogus"}, strings.NewReader(p), &out, &errBuf)
+	if code == 0 {
+		t.Fatalf("expected non-zero exit for invalid --input")
 	}
 }

@@ -74,9 +74,12 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		s.GroupBy = *merged.GroupBy
 	}
 	if merged.Detail != "" {
-		if f, err := config.ParseFidelity(merged.Detail); err == nil {
-			s.Detail = f
+		f, err := config.ParseFidelity(merged.Detail)
+		if err != nil {
+			fmt.Fprintln(stderr, "config:", err)
+			return 1
 		}
+		s.Detail = f
 	}
 	if *detail != "" {
 		f, err := config.ParseFidelity(*detail)
@@ -94,10 +97,15 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 
 	mode := input.ModeAuto
 	switch pick(*inputMode, merged.Input) {
+	case "", "auto":
+		mode = input.ModeAuto
 	case "wrapped":
 		mode = input.ModeWrapped
 	case "plan":
 		mode = input.ModePlan
+	default:
+		fmt.Fprintln(stderr, "invalid --input (want auto|wrapped|plan)")
+		return 1
 	}
 
 	units, loadErrs, err := input.Read(stdin, mode, *name)
