@@ -22,6 +22,10 @@ type wrapped struct {
 	Plan json.RawMessage `json:"plan"`
 }
 
+// undecodableOuterRecord is the Name value assigned to a LoadError when the
+// outer NDJSON record itself cannot be decoded (structural error).
+const undecodableOuterRecord = "?"
+
 func Read(r io.Reader, mode Mode, defaultName string) ([]plan.Unit, []plan.LoadError, error) {
 	all, err := io.ReadAll(r)
 	if err != nil {
@@ -63,7 +67,10 @@ func Read(r io.Reader, mode Mode, defaultName string) ([]plan.Unit, []plan.LoadE
 			break
 		}
 		if derr != nil {
-			loadErrs = append(loadErrs, plan.LoadError{Name: "?", Message: derr.Error()})
+			// Structural error in outer NDJSON record: the Decoder's position is
+			// unrecoverable after a decode error, so we record the error and break
+			// the stream to avoid looping or emitting garbage.
+			loadErrs = append(loadErrs, plan.LoadError{Name: undecodableOuterRecord, Message: derr.Error()})
 			break
 		}
 		u, perr := plan.ParsePlan(w.Name, w.Plan)
