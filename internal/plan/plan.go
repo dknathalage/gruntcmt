@@ -102,11 +102,11 @@ type tfResourceChange struct {
 }
 
 type tfPlan struct {
-	FormatVersion    string                      `json:"format_version"`
-	TerraformVersion string                      `json:"terraform_version"`
-	ResourceChanges  []tfResourceChange          `json:"resource_changes"`
-	ResourceDrift    []tfResourceChange          `json:"resource_drift"`
-	OutputChanges    map[string]tfChange         `json:"output_changes"`
+	FormatVersion    string              `json:"format_version"`
+	TerraformVersion string              `json:"terraform_version"`
+	ResourceChanges  []tfResourceChange  `json:"resource_changes"`
+	ResourceDrift    []tfResourceChange  `json:"resource_drift"`
+	OutputChanges    map[string]tfChange `json:"output_changes"`
 }
 
 func deriveAction(actions []string) Action {
@@ -140,7 +140,9 @@ func ParsePlan(name string, raw []byte) (Unit, error) {
 	}
 	u := Unit{Name: name, TerraformVersion: p.TerraformVersion}
 	for _, rc := range p.ResourceChanges {
-		u.Changes = append(u.Changes, ResourceChange{Address: rc.Address, Action: deriveAction(rc.Change.Actions)})
+		c := ResourceChange{Address: rc.Address, Action: deriveAction(rc.Change.Actions)}
+		c.Attributes, c.Unchanged = diffAttrs(rc.Change)
+		u.Changes = append(u.Changes, c)
 	}
 	for _, rc := range p.ResourceDrift {
 		u.Drift = append(u.Drift, ResourceChange{Address: rc.Address, Action: deriveAction(rc.Change.Actions)})
