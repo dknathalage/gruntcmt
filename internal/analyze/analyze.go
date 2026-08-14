@@ -64,7 +64,7 @@ func Analyze(units []plan.Unit, loadErrs []plan.LoadError, s config.Settings) Re
 	var order []string
 	for _, u := range units {
 		u.Detail = s.DetailFor(u.Name)
-		if u.TerraformVersion != "" {
+		if r.TerraformVersion == "" && u.TerraformVersion != "" {
 			r.TerraformVersion = u.TerraformVersion
 		}
 		key := groupKey(u.Name, s.GroupBy)
