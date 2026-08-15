@@ -4,8 +4,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/dknathalage/gruntcmt/internal/config"
 	"github.com/dknathalage/gruntcmt/internal/plan"
+	"github.com/dknathalage/gruntcmt/internal/ruleset"
 )
 
 type Group struct {
@@ -18,6 +18,7 @@ type Group struct {
 type Report struct {
 	Scope            string
 	Title            string
+	GroupBy          int
 	TerraformVersion string
 	Commit           string
 	Groups           []Group
@@ -55,19 +56,15 @@ func addCounts(a *plan.Counts, b plan.Counts) {
 	a.NoOp += b.NoOp
 }
 
-func Analyze(units []plan.Unit, loadErrs []plan.LoadError, s config.Settings) Report {
-	r := Report{Scope: s.Scope, Title: s.Render.Title, Commit: s.Commit, LoadErrors: loadErrs}
-	if r.Title == "" {
-		r.Title = "Terragrunt plan"
-	}
+func buildReport(scope, title string, groupBy int, units []plan.Unit, loadErrs []plan.LoadError) Report {
+	r := Report{Scope: scope, Title: title, GroupBy: groupBy, LoadErrors: loadErrs}
 	byKey := map[string]*Group{}
 	var order []string
 	for _, u := range units {
-		u.Detail = s.DetailFor(u.Name)
 		if r.TerraformVersion == "" && u.TerraformVersion != "" {
 			r.TerraformVersion = u.TerraformVersion
 		}
-		key := groupKey(u.Name, s.GroupBy)
+		key := groupKey(u.Name, groupBy)
 		g, ok := byKey[key]
 		if !ok {
 			g = &Group{Key: key}
@@ -102,4 +99,48 @@ func Analyze(units []plan.Unit, loadErrs []plan.LoadError, s config.Settings) Re
 		return r.Groups[i].Key < r.Groups[j].Key
 	})
 	return r
+}
+
+func Analyze(units []plan.Unit, loadErrs []plan.LoadError, rs ruleset.Ruleset, mainScope string) []Report {
+	type bucket struct {
+		scope     string
+		dedicated bool
+		units     []plan.Unit
+	}
+	order := []string{mainScope}
+	buckets := map[string]*bucket{mainScope: {scope: mainScope, dedicated: false}}
+	for _, s := range rs.DedicatedScopes() {
+		order = append(order, s)
+		buckets[s] = &bucket{scope: s, dedicated: true}
+	}
+	for _, u := range units {
+		for i := range u.Changes {
+			u.Changes[i].Detail = rs.Detail(u.Name, u.Changes[i].Action)
+		}
+		scope, dedicated := rs.Assign(u.Name)
+		key := mainScope
+		if dedicated {
+			key = scope
+		}
+		b := buckets[key]
+		if b == nil {
+			b = buckets[mainScope]
+		}
+		b.units = append(b.units, u)
+	}
+
+	var reports []Report
+	for _, key := range order {
+		b := buckets[key]
+		isMain := key == mainScope
+		var le []plan.LoadError
+		if isMain {
+			le = loadErrs
+		}
+		if len(b.units) == 0 && len(le) == 0 {
+			continue
+		}
+		reports = append(reports, buildReport(b.scope, rs.Title(b.scope, b.dedicated), rs.GroupBy(b.scope, b.dedicated), b.units, le))
+	}
+	return reports
 }
