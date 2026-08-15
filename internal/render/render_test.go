@@ -198,3 +198,20 @@ func TestMarker(t *testing.T) {
 		t.Fatalf("Marker() = %q", got)
 	}
 }
+
+func TestGroupLabelEmptyKeyRendersAll(t *testing.T) {
+	if groupLabel("") != "(all)" || groupLabel("prod") != "prod" {
+		t.Fatalf("groupLabel: empty=%q prod=%q", groupLabel(""), groupLabel("prod"))
+	}
+	u := plan.Unit{Name: "x", Changes: []plan.ResourceChange{{Address: "a", Action: plan.ActionCreate, Detail: plan.FidelityResource}}, Counts: plan.Counts{Add: 1}}
+	r := analyze.Report{Scope: "s", Title: "T", GroupBy: 0,
+		Groups: []analyze.Group{{Key: "", Units: []plan.Unit{u}, Counts: u.Counts, Severity: 2}},
+		Totals: u.Counts, Severity: 2}
+	out := Render(r)
+	if strings.Contains(out, "<code></code>") {
+		t.Errorf("empty group key still renders <code></code>:\n%s", out)
+	}
+	if !strings.Contains(out, "<code>(all)</code> — 1 units") {
+		t.Errorf("group header should use (all):\n%s", out)
+	}
+}
