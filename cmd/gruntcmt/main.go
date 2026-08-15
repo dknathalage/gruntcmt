@@ -25,7 +25,7 @@ import (
 // and can also be overridden at build time via -ldflags "-X main.version=...".
 // For older tags where it is still "dev", resolveVersion falls back to the module
 // version embedded by `go install`/`go build`.
-var version = "0.4.0" // x-release-please-version
+var version = "0.4.1" // x-release-please-version
 
 func resolveVersion() string {
 	if version != "dev" {
