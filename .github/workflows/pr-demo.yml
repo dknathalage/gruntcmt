@@ -61,5 +61,5 @@ jobs:
         run: |
           eval "$(mise activate bash)"
           ./plan-scenarios.sh > "$GITHUB_WORKSPACE/s.ndjson"
-          "$GRUNTCMT" --scope scenarios --ruleset examples/terragrunt/gruntcmt.yaml --commit "$GITHUB_SHA" --out gh < "$GITHUB_WORKSPACE/s.ndjson"
-          "$GRUNTCMT" --scope scenarios --ruleset examples/terragrunt/gruntcmt.yaml --commit "$GITHUB_SHA" < "$GITHUB_WORKSPACE/s.ndjson" >> "$GITHUB_STEP_SUMMARY"
+          "$GRUNTCMT" --scope scenarios --ruleset gruntcmt.yaml --commit "$GITHUB_SHA" --out gh < "$GITHUB_WORKSPACE/s.ndjson"
+          "$GRUNTCMT" --scope scenarios --ruleset gruntcmt.yaml --commit "$GITHUB_SHA" < "$GITHUB_WORKSPACE/s.ndjson" >> "$GITHUB_STEP_SUMMARY"
