@@ -120,3 +120,34 @@ func TestRunAttributeFidelityEndToEnd(t *testing.T) {
 		t.Errorf("missing '(known after apply)' in output:\n%s", s)
 	}
 }
+
+func TestRunOutGhWithoutTokenFails(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("GH_TOKEN", "")
+	const p = `{"format_version":"1.2","terraform_version":"1.9.5","resource_changes":[{"address":"aws_s3_bucket.b","change":{"actions":["create"]}}]}`
+	var out, errBuf bytes.Buffer
+	code := run([]string{"--scope", "x", "--name", "a", "--out", "gh"}, strings.NewReader(p), &out, &errBuf)
+	if code == 0 {
+		t.Fatalf("expected non-zero exit without token; stderr=%s", errBuf.String())
+	}
+	if out.Len() != 0 {
+		t.Errorf("--out gh should not write markdown to stdout, got %q", out.String())
+	}
+}
+
+func TestRunInvalidOutFails(t *testing.T) {
+	const p = `{"format_version":"1.2","terraform_version":"1.9.5","resource_changes":[{"address":"aws_s3_bucket.b","change":{"actions":["create"]}}]}`
+	var out, errBuf bytes.Buffer
+	if code := run([]string{"--scope", "x", "--name", "a", "--out", "bogus"}, strings.NewReader(p), &out, &errBuf); code == 0 {
+		t.Fatal("expected non-zero exit for invalid --out")
+	}
+}
+
+func TestRunOutStdoutDefaultUnchanged(t *testing.T) {
+	const p = `{"format_version":"1.2","terraform_version":"1.9.5","resource_changes":[{"address":"aws_s3_bucket.b","change":{"actions":["create"]}}]}`
+	var out, errBuf bytes.Buffer
+	code := run([]string{"--scope", "x", "--name", "a"}, strings.NewReader(p), &out, &errBuf)
+	if code != 0 || !strings.HasPrefix(out.String(), "<!-- gruntcmt:scope=x -->") {
+		t.Fatalf("default stdout path changed: code=%d out=%q", code, out.String())
+	}
+}

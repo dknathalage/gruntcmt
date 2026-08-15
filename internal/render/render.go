@@ -77,9 +77,16 @@ func unitSeverity(u plan.Unit) int {
 	return sev
 }
 
+// Marker returns the HTML comment gruntcmt emits as the first output line. It is
+// the stable per-scope identity used for update-in-place; callers that post the
+// comment themselves (e.g. --out gh) match on this exact string.
+func Marker(scope string) string {
+	return fmt.Sprintf("<!-- gruntcmt:scope=%s -->", scope)
+}
+
 func Render(r analyze.Report, s config.Settings) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "<!-- gruntcmt:scope=%s -->\n", r.Scope)
+	fmt.Fprintf(&b, "%s\n", Marker(r.Scope))
 	title := r.Title
 	if title == "" {
 		title = "Terragrunt plan"
