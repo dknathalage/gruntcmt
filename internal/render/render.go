@@ -90,12 +90,8 @@ func Render(r analyze.Report) string {
 	// Summary table with trailing status column.
 	b.WriteString("| Group | Units | Add | Change | Destroy | |\n|---|---|---|---|---|---|\n")
 	for _, g := range r.Groups {
-		key := g.Key
-		if key == "" {
-			key = "(all)"
-		}
 		fmt.Fprintf(&b, "| `%s` | %d | %d | %d | %d | %s |\n",
-			key, len(g.Units), g.Counts.Add, g.Counts.Change, g.Counts.Destroy, groupStatusCell(g))
+			groupLabel(g.Key), len(g.Units), g.Counts.Add, g.Counts.Change, g.Counts.Destroy, groupStatusCell(g))
 	}
 	b.WriteString("\n")
 
@@ -165,6 +161,15 @@ func unitBody(u plan.Unit) string {
 	return b.String()
 }
 
+// groupLabel is the display name for a group key; the empty key (group-by 0, a
+// single flat group) renders as "(all)" in both the table and the group header.
+func groupLabel(key string) string {
+	if key == "" {
+		return "(all)"
+	}
+	return key
+}
+
 func renderGroup(b *strings.Builder, g analyze.Group) {
 	// Collect unit bodies; skip units that produce nothing (all-summary changes).
 	var bodies []string
@@ -178,7 +183,7 @@ func renderGroup(b *strings.Builder, g analyze.Group) {
 		return
 	}
 
-	fmt.Fprintf(b, "<details><summary><code>%s</code> — %d units</summary>\n\n", g.Key, len(g.Units))
+	fmt.Fprintf(b, "<details><summary><code>%s</code> — %d units</summary>\n\n", groupLabel(g.Key), len(g.Units))
 	for _, body := range bodies {
 		b.WriteString(body)
 	}
