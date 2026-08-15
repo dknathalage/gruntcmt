@@ -1,0 +1,76 @@
+# Runs on PRs to this repo. Builds gruntcmt from the PR, plans the example
+# terragrunt project for real (OpenTofu, no cloud), and uses `--out gh` to post
+# the results as PR comments — exercising every discussed scenario:
+#   * scope=demo-create  : first plan, all creates (green), resource fidelity
+#   * scope=demo-changes : apply + mutate -> destroys/replacements/no-op (red),
+#                          attribute fidelity with per-path overrides + fold-noop
+# Both scopes post their own comment (updated in place on re-runs); the full
+# attribute breakdown also goes to the Actions job summary.
+#
+# Note: for pull requests from forks the token is read-only, so the comment steps
+# will no-op there. Same-repo PRs (the intended demo) get pull-requests: write.
+name: pr-demo
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - run: go test ./...
+
+  demo:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - name: Build gruntcmt from this PR
+        run: |
+          go build -o "$RUNNER_TEMP/gruntcmt" ./cmd/gruntcmt
+          # Reference by absolute path so it can't be shadowed by a mise `gruntcmt`
+          # shim (the repo's own mise.toml declares the go: backend).
+          echo "GRUNTCMT=$RUNNER_TEMP/gruntcmt" >> "$GITHUB_ENV"
+
+      # OpenTofu + terragrunt, pinned in examples/terragrunt/mise.toml.
+      - uses: jdx/mise-action@v2
+        with:
+          install: "false"
+      - name: Install OpenTofu + terragrunt
+        working-directory: examples/terragrunt
+        run: mise install
+
+      - name: Scenario A — first plan (all creates)
+        working-directory: examples/terragrunt
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          eval "$(mise activate bash)"
+          ./plan-to-ndjson.sh > plans.ndjson
+          # PR comment (resource fidelity) + job summary (attribute fidelity)
+          "$GRUNTCMT" --scope demo-create --detail resource --commit "$GITHUB_SHA" --out gh < plans.ndjson
+          "$GRUNTCMT" --scope demo-create --detail attribute --commit "$GITHUB_SHA" < plans.ndjson >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Scenario B — apply + mutate (destroys / replaces / no-op)
+        working-directory: examples/terragrunt
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          eval "$(mise activate bash)"
+          ./demo-changes.sh > changes.ndjson
+          # attribute fidelity + fold-noop via the example config
+          "$GRUNTCMT" --scope demo-changes --config .gruntcmt.yaml --commit "$GITHUB_SHA" --out gh < changes.ndjson
+          "$GRUNTCMT" --scope demo-changes --config .gruntcmt.yaml --commit "$GITHUB_SHA" < changes.ndjson >> "$GITHUB_STEP_SUMMARY"

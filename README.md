@@ -110,11 +110,32 @@ cat staging.ndjson | gruntcmt --scope staging --detail resource > staging-commen
 | `--config` | `""` | Explicit config file; skips discovery. |
 | `--no-config` | `false` | Ignore all config files (CLI flags still apply); reproducible CI. |
 | `--print-config` | `false` | Print resolved config to stderr and exit. |
+| `--out` | `stdout` | Output destination: `stdout` (markdown) or `gh` (post/update the PR comment). |
+| `--repo` | `""` | `owner/name` for `--out gh` (default `$GITHUB_REPOSITORY`). |
+| `--pr` | `0` | PR number for `--out gh` (default: auto-detected in GitHub Actions). |
 | `--version` | `false` | Print version and exit. |
 
 **Exit codes:** `0` on success (even when some units had load errors). Non-zero when
-stdin is unreadable, config is invalid, or stdin contains no parseable plan at all.
-Plan content (including destroys) never affects the exit code.
+stdin is unreadable, config is invalid, stdin contains no parseable plan at all, or
+`--out gh` fails. Plan content (including destroys) never affects the exit code.
+
+### Post directly with `--out gh`
+
+By default gruntcmt is a pure filter (`--out stdout`). Passing `--out gh` makes it
+create or update the PR comment in place itself, via the GitHub REST API — no `gh`
+CLI, no separate posting step:
+
+```bash
+cat plans.ndjson | gruntcmt --scope infra --detail resource --out gh
+```
+
+It needs a token in `$GITHUB_TOKEN` (or `$GH_TOKEN`); the repo and PR number default
+to the GitHub Actions environment (`$GITHUB_REPOSITORY`, `$GITHUB_REF`) and can be
+set with `--repo`/`--pr` elsewhere. `$GITHUB_API_URL` is honored for GitHub
+Enterprise. The comment URL is printed to stderr; with `--out gh`, stdout stays
+empty. Update-in-place uses the same `<!-- gruntcmt:scope=... -->` marker, so each
+scope owns one comment. This is the only part of gruntcmt that touches the network,
+and only when you opt in.
 
 ## Fidelity Levels (`--detail`)
 

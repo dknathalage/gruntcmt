@@ -225,3 +225,12 @@ func TestRenderGoldenFoldNoop(t *testing.T) {
 		t.Errorf("mismatch\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
 }
+
+func TestMarker(t *testing.T) {
+	if got := Marker("infra"); got != "<!-- gruntcmt:scope=infra -->" {
+		t.Fatalf("Marker(infra) = %q", got)
+	}
+	if got := Marker(""); got != "<!-- gruntcmt:scope= -->" {
+		t.Fatalf("Marker() = %q", got)
+	}
+}

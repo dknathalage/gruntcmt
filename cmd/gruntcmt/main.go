@@ -1,14 +1,21 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
+	"regexp"
 	"runtime/debug"
+	"strconv"
+	"strings"
 
 	"github.com/dknathalage/gruntcmt/internal/analyze"
 	"github.com/dknathalage/gruntcmt/internal/config"
+	"github.com/dknathalage/gruntcmt/internal/gh"
 	"github.com/dknathalage/gruntcmt/internal/input"
 	"github.com/dknathalage/gruntcmt/internal/plan"
 	"github.com/dknathalage/gruntcmt/internal/render"
@@ -44,6 +51,9 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		configPath  = fs.String("config", "", "explicit config file")
 		noConfig    = fs.Bool("no-config", false, "ignore all config files")
 		printConfig = fs.Bool("print-config", false, "print resolved config to stderr and exit")
+		out         = fs.String("out", "stdout", "output destination: stdout|gh")
+		repo        = fs.String("repo", "", "owner/name for --out gh (default $GITHUB_REPOSITORY)")
+		prNum       = fs.Int("pr", 0, "pull request number for --out gh (default: auto-detect in GitHub Actions)")
 		showVersion = fs.Bool("version", false, "print version and exit")
 	)
 	if err := fs.Parse(args); err != nil {
@@ -153,7 +163,92 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 1
 	}
 	report := analyze.Analyze(units, loadErrs, s)
-	io.WriteString(stdout, render.Render(report, s))
+	md := render.Render(report, s)
+
+	switch *out {
+	case "", "stdout":
+		io.WriteString(stdout, md)
+		return 0
+	case "gh":
+		return postToGitHub(stderr, s.Scope, md, *repo, *prNum)
+	default:
+		fmt.Fprintln(stderr, "invalid --out (want stdout|gh)")
+		return 1
+	}
+}
+
+// postToGitHub creates or updates the PR comment in place via the GitHub REST API.
+// Token comes from $GITHUB_TOKEN/$GH_TOKEN; repo/pr default to the GitHub Actions
+// environment. On success it prints the comment URL to stderr and returns 0.
+func postToGitHub(stderr io.Writer, scope, body, repo string, pr int) int {
+	token := firstEnv("GITHUB_TOKEN", "GH_TOKEN")
+	if token == "" {
+		fmt.Fprintln(stderr, "gruntcmt: --out gh needs a token in $GITHUB_TOKEN or $GH_TOKEN")
+		return 1
+	}
+	if repo == "" {
+		repo = os.Getenv("GITHUB_REPOSITORY")
+	}
+	if repo == "" {
+		fmt.Fprintln(stderr, "gruntcmt: --out gh needs --repo or $GITHUB_REPOSITORY (owner/name)")
+		return 1
+	}
+	if pr == 0 {
+		pr = detectPR()
+	}
+	if pr == 0 {
+		fmt.Fprintln(stderr, "gruntcmt: --out gh needs --pr or a detectable pull request (GITHUB_REF/GITHUB_EVENT_PATH)")
+		return 1
+	}
+	apiURL := os.Getenv("GITHUB_API_URL")
+	if apiURL == "" {
+		apiURL = "https://api.github.com"
+	}
+	client := &gh.Client{HTTP: http.DefaultClient, APIURL: strings.TrimRight(apiURL, "/"), Token: token}
+	url, err := client.UpsertComment(context.Background(), repo, pr, render.Marker(scope), body)
+	if err != nil {
+		fmt.Fprintln(stderr, "gruntcmt:", err)
+		return 1
+	}
+	fmt.Fprintln(stderr, "gruntcmt: commented at", url)
+	return 0
+}
+
+func firstEnv(keys ...string) string {
+	for _, k := range keys {
+		if v := os.Getenv(k); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+var pullRefRe = regexp.MustCompile(`^refs/pull/(\d+)/`)
+
+// detectPR resolves the PR number from the GitHub Actions environment: first the
+// GITHUB_REF (refs/pull/<n>/merge), then the event payload at GITHUB_EVENT_PATH.
+func detectPR() int {
+	if m := pullRefRe.FindStringSubmatch(os.Getenv("GITHUB_REF")); m != nil {
+		if n, err := strconv.Atoi(m[1]); err == nil {
+			return n
+		}
+	}
+	if p := os.Getenv("GITHUB_EVENT_PATH"); p != "" {
+		if raw, err := os.ReadFile(p); err == nil {
+			var ev struct {
+				Number      int `json:"number"`
+				PullRequest struct {
+					Number int `json:"number"`
+				} `json:"pull_request"`
+			}
+			if json.Unmarshal(raw, &ev) == nil {
+				if ev.PullRequest.Number != 0 {
+					return ev.PullRequest.Number
+				}
+				return ev.Number
+			}
+		}
+	}
 	return 0
 }
 
