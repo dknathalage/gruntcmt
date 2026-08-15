@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.2](https://github.com/dknathalage/gruntcmt/compare/v0.4.1...v0.4.2) (2026-08-15)
+
+
+### Bug Fixes
+
+* Merge pull request [#5](https://github.com/dknathalage/gruntcmt/issues/5) from dknathalage/fix/stale-action-and-example-workflow ([b18f3f3](https://github.com/dknathalage/gruntcmt/commit/b18f3f3e6a71b6533d7f315792c871a83034ec59))
+* repair stale composite action + example workflow, pluralize unit count ([b18f3f3](https://github.com/dknathalage/gruntcmt/commit/b18f3f3e6a71b6533d7f315792c871a83034ec59))
+* repair stale composite action and example workflow; pluralize unit count ([622829a](https://github.com/dknathalage/gruntcmt/commit/622829a533305116613239912b78b4049e88a394))
+
 ## [0.4.1](https://github.com/dknathalage/gruntcmt/compare/v0.4.0...v0.4.1) (2026-08-15)
 
 ### Bug Fixes
