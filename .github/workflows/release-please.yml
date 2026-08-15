@@ -1,0 +1,40 @@
+# Automates releases from conventional commits on main. release-please maintains a
+# "release PR" that bumps the version and updates CHANGELOG.md; merging it creates
+# the GitHub Release + tag (vX.Y.Z). Config lives in release-please-config.json and
+# .release-please-manifest.json (bootstrapped at the current 0.4.0).
+#
+# Versioning: pre-1.0, `feat!`/BREAKING CHANGE bumps the MINOR (0.x), `feat` the
+# minor, `fix` the patch — matching how this repo has been versioned so far.
+name: release-please
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write        # create tags/releases and the release PR's commits
+  pull-requests: write   # open/update the release PR
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - id: release
+        uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Keep the moving `v1` alias (used by `uses: dknathalage/gruntcmt@v1`)
+      # pointed at the newest release tag whenever one is cut.
+      - if: ${{ steps.release.outputs.release_created }}
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - if: ${{ steps.release.outputs.release_created }}
+        env:
+          TAG: ${{ steps.release.outputs.tag_name }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -f v1 "$TAG"
+          git push -f origin v1
