@@ -211,7 +211,7 @@ func TestGroupLabelEmptyKeyRendersAll(t *testing.T) {
 	if strings.Contains(out, "<code></code>") {
 		t.Errorf("empty group key still renders <code></code>:\n%s", out)
 	}
-	if !strings.Contains(out, "<code>(all)</code> — 1 units") {
+	if !strings.Contains(out, "<code>(all)</code> — 1 unit") {
 		t.Errorf("group header should use (all):\n%s", out)
 	}
 }

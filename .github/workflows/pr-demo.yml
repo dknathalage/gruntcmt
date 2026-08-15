@@ -29,6 +29,23 @@ jobs:
           go-version: "1.24"
       - run: go test ./...
 
+  # Smoke-test the shipped composite action end to end so its flag surface can't
+  # silently drift from the CLI again. Uses the local action (`uses: ./`) against a
+  # tiny fixture; job summary only, no PR comment (no token/side effects needed).
+  action-smoke:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fixture NDJSON
+        run: printf '%s\n' '{"name":"a/b","plan":{"format_version":"1.0","resource_changes":[]}}' > fixture.ndjson
+      - uses: ./
+        with:
+          ndjson: fixture.ndjson
+          scope: smoke
+          post-comment: "false"
+          job-summary: "true"
+
   demo:
     needs: test
     runs-on: ubuntu-latest
