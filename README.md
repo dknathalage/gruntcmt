@@ -1,13 +1,12 @@
 # gruntcmt
 
 `gruntcmt` is a pure Unix filter that turns Terraform plan JSON — produced by
-terragrunt units — into a single, meaningful chunk of GitHub-flavored markdown on
-stdout. It reads plan JSON from stdin, writes markdown to stdout, and does nothing
-else: no network calls, no state, no invocations of terraform or terragrunt. The
-markdown targets two GitHub surfaces — PR comments and the Actions job summary
-(`$GITHUB_STEP_SUMMARY`) — with independently chosen fidelity levels, and embeds a
-stable HTML comment marker so CI can update a comment in place without keeping its
-own state.
+terragrunt units — into meaningful GitHub-flavored markdown. It reads plan JSON
+from stdin, writes markdown to stdout, and does nothing else by default: the only
+optional network calls are ruleset `base:` fetch and `--out gh` comment posting.
+The markdown targets PR comments and the Actions job summary
+(`$GITHUB_STEP_SUMMARY`), and embeds a stable HTML comment marker so CI can
+update a comment in place without keeping its own state.
 
 ## Install
 
@@ -55,7 +54,7 @@ Produce this trivially with a per-unit loop:
 for unit in production/networking/vpc production/networking/nat; do
   ( cd "$unit" && terragrunt show -json plan.tfplan \
       | jq -c --arg n "$unit" '{name:$n, plan:.}' )
-done | gruntcmt --scope production --detail resource > comment.md
+done | gruntcmt --scope production --commit "$GITHUB_SHA" > comment.md
 ```
 
 **Bare plan (single-unit)** — a single `terraform show -json` document (may be
@@ -70,18 +69,184 @@ terragrunt show -json plan.tfplan | gruntcmt --name production/networking/vpc
 bare plan; otherwise it is treated as wrapped NDJSON. Per-unit parse failures are
 surfaced in the output as a load-error callout and never abort the run.
 
+## Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--scope` | `""` | Scope label used in the marker and headline. |
+| `--name` | `plan` | Unit name for a bare (unwrapped) single plan. |
+| `--input` | `""` (auto) | Force input mode: `auto`, `wrapped`, or `plan`. |
+| `--commit` | `""` | Commit SHA stamped in the footer for currency. |
+| `--ruleset` | `""` | Path to a `gruntcmt.yaml` ruleset file; if omitted, `./gruntcmt.yaml` is used when present. |
+| `--print-ruleset` | `false` | Print the resolved ruleset (after base merge) to stderr and exit. |
+| `--out` | `stdout` | Output destination: `stdout` (markdown) or `gh` (post/update the PR comment). |
+| `--repo` | `""` | `owner/name` for `--out gh` (default `$GITHUB_REPOSITORY`). |
+| `--pr` | `0` | PR number for `--out gh` (default: auto-detected in GitHub Actions). |
+| `--version` | `false` | Print version and exit. |
+
+**Exit codes:** `0` on success (even when some units had load errors). Non-zero when
+stdin is unreadable, the ruleset is invalid, stdin contains no parseable plan at all,
+or `--out gh` fails. Plan content (including destroys) never affects the exit code.
+
+### Post directly with `--out gh`
+
+By default gruntcmt is a pure filter (`--out stdout`). Passing `--out gh` makes it
+create or update the PR comment in place itself, via the GitHub REST API — no `gh`
+CLI, no separate posting step:
+
+```bash
+cat plans.ndjson | gruntcmt --scope infra --out gh
+```
+
+It needs a token in `$GITHUB_TOKEN` (or `$GH_TOKEN`); the repo and PR number default
+to the GitHub Actions environment (`$GITHUB_REPOSITORY`, `$GITHUB_REF`) and can be
+set with `--repo`/`--pr` elsewhere. `$GITHUB_API_URL` is honored for GitHub
+Enterprise. The comment URL is printed to stderr; with `--out gh`, stdout stays
+empty. Update-in-place uses the same `<!-- gruntcmt:scope=... -->` marker, so each
+scope owns one comment. This is the only part of gruntcmt that touches the network
+(other than `base:` fetch on startup), and only when you opt in.
+
+When a ruleset uses `dedicated-comment: true` rules (see below), `--out gh` posts
+each report as its own comment, each with its own marker. `--out stdout` concatenates
+them separated by blank lines.
+
+> **Note:** with multiple comments, `--out gh` posts them sequentially and returns non-zero on the first failure, so a mid-run failure can leave earlier comments already posted/updated (not atomic).
+
+## Ruleset (`gruntcmt.yaml`)
+
+The ruleset is an optional YAML file — `gruntcmt.yaml` (non-hidden) in the working
+directory, or supplied with `--ruleset`. It controls per-path detail fidelity,
+grouping, titles, and dedicated comment splitting. There is no upward directory
+search, no global config file, and no environment variable that overrides ruleset
+values.
+
+### Rules array
+
+The ruleset contains a `rules` array. Each rule matches on `path` (a doublestar
+glob) and sets detail fidelity per change action, plus optional display and routing
+settings. Rules are evaluated in order; the **last matching rule** wins for each
+field independently.
+
+```yaml
+# gruntcmt.yaml
+base: ""          # optional: owner/repo//path@ref  (see "Base rulesets" below)
+
+rules:
+  - path: "**"           # doublestar glob on the unit's /‑delimited name; ** = match all
+    title: "Terraform plan"          # comment/section headline (string)
+    group-by: 1                      # leading path segments to group by (int; 0 = flat)
+    dedicated-comment: false         # pull matching units into their own comment
+    scope: ""                        # scope/marker key for the dedicated comment
+    create: resource                 # detail for create actions:  summary|resource|attribute
+    update: resource                 # detail for update actions
+    delete: resource                 # detail for delete actions
+    replace: resource                # detail for replace actions
+    noop: summary                    # detail for no-op actions
+```
+
+All fields are optional. A rule with no `path` matches nothing (the field defaults
+to `""`). Only fields explicitly set in a rule participate in last-match resolution;
+unset fields do not shadow earlier rules.
+
+### Per-action detail resolution
+
+Detail fidelity is resolved **per resource change** (not per unit), using:
+
+1. Start from the built-in default for the change's action:
+   - `create`, `update`, `delete`, `replace` → `resource`
+   - `noop` (and read) → `summary`
+2. Walk every rule in order. For each rule whose `path` glob matches the **unit's
+   path** AND that rule sets the field for this change's action (e.g. `update:`), the
+   detail is updated to that value.
+3. The **last** such match wins.
+
+Detail level meanings:
+
+| Level | Output |
+|-------|--------|
+| `summary` | Resource is counted in the summary table but not listed individually. |
+| `resource` | Resource address and action appear in the unit's collapsible section. |
+| `attribute` | Full before→after attribute diff is included (forces-replacement, sensitive, known-after-apply). |
+
+### Dedicated comments
+
+A rule with `dedicated-comment: true` pulls all units whose path matches into a
+separate comment, identified by the rule's `scope` (and its own `title`/`group-by`
+settings). Units that do not match any dedicated rule go into the main comment.
+
+One `gruntcmt` invocation can emit multiple reports — one per dedicated scope plus
+the main comment. With `--out gh`, each report is posted/updated as its own PR
+comment, each with its own `<!-- gruntcmt:scope=<scope> -->` marker. With
+`--out stdout`, the reports are concatenated, separated by blank lines.
+
+### Example ruleset
+
+This is adapted from [`examples/terragrunt/gruntcmt.yaml`](examples/terragrunt/gruntcmt.yaml):
+
+```yaml
+# gruntcmt.yaml
+rules:
+  - path: "**"
+    title: "Terragrunt plan"
+    group-by: 1
+    create: summary
+    update: resource
+    delete: attribute
+    replace: attribute
+    noop: summary
+
+  - path: "**/security"
+    dedicated-comment: true
+    scope: security
+    title: "Security plan"
+    create: attribute
+    delete: attribute
+```
+
+With this ruleset:
+- All units default to the `**` rule: updates shown at resource level, deletes/replaces at attribute level, creates/noops counted only.
+- Units under any `security/` directory are pulled into a dedicated comment with scope `security` and full attribute diff for creates and deletes.
+- Running `gruntcmt --out gh` posts two PR comments: one for the main scope, one for `scope=security`.
+
+### Base rulesets
+
+`base:` fetches a shared ruleset from GitHub and merges it under the local rules
+(local rules are appended after base rules, so local **last-match wins**):
+
+```yaml
+base: owner/repo//path/to/gruntcmt.yaml@main
+```
+
+Format: `owner/repo//path[@ref]`. The `@ref` part is optional (defaults to the
+repo's default branch). The file is fetched via the GitHub Contents API
+(`$GITHUB_API_URL` for GitHub Enterprise).
+
+Authentication uses, in order:
+1. `$GITHUB_TOKEN`
+2. `$GH_TOKEN`
+3. Output of `gh auth token` (if the `gh` CLI is available)
+
+Base rulesets can themselves have a `base:`, allowing chains up to 10 levels deep.
+Cycles are detected and cause a hard error.
+
+Inspect the final merged ruleset with:
+
+```bash
+gruntcmt --ruleset gruntcmt.yaml --print-ruleset < /dev/null
+```
+
 ## Composition Models
 
 Both are first-class; `gruntcmt` does not know which model is in use.
 
 **One grouped comment** — funnel all units into one invocation. Output is grouped by
-path segment depth (`--group-by`), producing one comment with one marker:
+path segment depth (`group-by` in the ruleset), producing one comment with one marker:
 
 ```bash
 for unit in production/networking/vpc staging/networking/vpc; do
   ( cd "$unit" && terragrunt show -json plan.tfplan \
       | jq -c --arg n "$unit" '{name:$n, plan:.}' )
-done | gruntcmt --scope all-envs --detail resource > comment.md
+done | gruntcmt --scope all-envs --ruleset gruntcmt.yaml > comment.md
 ```
 
 **One comment per scope** — independent pipelines each run their own invocation.
@@ -91,132 +256,11 @@ that owns it. They never collide:
 
 ```bash
 # production pipeline
-cat production.ndjson | gruntcmt --scope production --detail resource > prod-comment.md
+cat production.ndjson | gruntcmt --scope production --ruleset gruntcmt.yaml > prod-comment.md
 
 # staging pipeline (independent CI job)
-cat staging.ndjson | gruntcmt --scope staging --detail resource > staging-comment.md
+cat staging.ndjson | gruntcmt --scope staging --ruleset gruntcmt.yaml > staging-comment.md
 ```
-
-## Flags
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--scope` | `""` | Scope label used in the marker and headline. |
-| `--name` | `plan` | Unit name for a bare (unwrapped) single plan. |
-| `--group-by` | `1` | Leading path segments to group by (0 = flat). |
-| `--detail` | `""` (config or `resource`) | Fidelity: `summary`, `resource`, or `attribute`. Overrides config globally. |
-| `--input` | `""` (auto) | Force input mode: `auto`, `wrapped`, or `plan`. |
-| `--commit` | `""` | Commit SHA stamped in the footer for currency. |
-| `--config` | `""` | Explicit config file; skips discovery. |
-| `--no-config` | `false` | Ignore all config files (CLI flags still apply); reproducible CI. |
-| `--print-config` | `false` | Print resolved config to stderr and exit. |
-| `--out` | `stdout` | Output destination: `stdout` (markdown) or `gh` (post/update the PR comment). |
-| `--repo` | `""` | `owner/name` for `--out gh` (default `$GITHUB_REPOSITORY`). |
-| `--pr` | `0` | PR number for `--out gh` (default: auto-detected in GitHub Actions). |
-| `--version` | `false` | Print version and exit. |
-
-**Exit codes:** `0` on success (even when some units had load errors). Non-zero when
-stdin is unreadable, config is invalid, stdin contains no parseable plan at all, or
-`--out gh` fails. Plan content (including destroys) never affects the exit code.
-
-### Post directly with `--out gh`
-
-By default gruntcmt is a pure filter (`--out stdout`). Passing `--out gh` makes it
-create or update the PR comment in place itself, via the GitHub REST API — no `gh`
-CLI, no separate posting step:
-
-```bash
-cat plans.ndjson | gruntcmt --scope infra --detail resource --out gh
-```
-
-It needs a token in `$GITHUB_TOKEN` (or `$GH_TOKEN`); the repo and PR number default
-to the GitHub Actions environment (`$GITHUB_REPOSITORY`, `$GITHUB_REF`) and can be
-set with `--repo`/`--pr` elsewhere. `$GITHUB_API_URL` is honored for GitHub
-Enterprise. The comment URL is printed to stderr; with `--out gh`, stdout stays
-empty. Update-in-place uses the same `<!-- gruntcmt:scope=... -->` marker, so each
-scope owns one comment. This is the only part of gruntcmt that touches the network,
-and only when you opt in.
-
-## Fidelity Levels (`--detail`)
-
-One uniform knob applied to every resource:
-
-| Level | Output |
-|-------|--------|
-| `summary` | Headline + counts table only. Smallest; fits tight comment budgets. |
-| `resource` | Adds per-unit collapsibles listing resource addresses and actions. **Default.** |
-| `attribute` | Adds a reconstructed per-attribute diff (before → after, forces-replacement, sensitive, known-after-apply). |
-
-Per-path overrides in config may raise or lower fidelity per unit. An explicit
-`--detail` flag is a global hammer that overrides config and per-path overrides.
-
-## Grouping (`--group-by N`)
-
-`N` is the number of leading `/`-delimited path segments that form a group key;
-deeper segments flatten into the unit's leaf label. Grouping is a single level
-(flat groups, flat units within).
-
-Given units `production/database/primary`, `production/database/replica`,
-`production/networking`, `staging/database/db1`:
-
-| Flag | Groups produced |
-|------|----------------|
-| `--group-by 0` | No groups — one flat list by full path. |
-| `--group-by 1` | `production` (3 units), `staging` (1 unit). Default. |
-| `--group-by 2` | `production/database` (primary, replica), `production/networking` (1), `staging/database` (1). |
-
-A unit with fewer path segments than `N` groups on its whole path as a singleton.
-
-## Configuration (`.gruntcmt.yaml`)
-
-Settings resolve from four layers, highest precedence first; layers merge
-key-by-key:
-
-1. CLI flags — always win.
-2. `--config <path>` — explicit file, skips discovery.
-3. Repo config — nearest `.gruntcmt.yaml` found by walking up from the current
-   directory to the repo root (`.git`) or filesystem root.
-4. Global config — `$XDG_CONFIG_HOME/gruntcmt/config.yaml`
-   (typically `~/.config/gruntcmt/config.yaml`).
-
-`--no-config` skips all four layers (useful for reproducible CI runs).
-`--print-config` prints the fully resolved configuration to stderr and exits.
-
-**YAML schema** (all keys are optional):
-
-```yaml
-# .gruntcmt.yaml
-group-by: 1                  # leading path segments for grouping (int)
-detail: resource             # default fidelity: summary | resource | attribute
-input: auto                  # input mode: auto | wrapped | plan
-
-render:
-  title: "Terragrunt plan"   # headline title string
-  emoji:                     # override severity glyphs (map; replaced wholesale)
-    destroy: "🔴"
-    change:  "🟡"
-    add:     "🟢"
-    noop:    "➖"
-  hide-unchanged: true       # collapse unchanged attributes to a count (attribute fidelity)
-  fold-noop: true            # fold no-op units/groups into collapsed sections
-
-overrides:                   # per-path behavior; last matching entry wins
-  - path: "**/database/**"   # glob on the /‑delimited unit path
-    detail: attribute
-  - path: "production/**"
-    detail: attribute
-  - path: "development/**"
-    detail: summary
-```
-
-**Per-path overrides:** each entry matches the unit path with a glob (`*`/`**`).
-When multiple entries match, the last one in file order wins. Plan-wide settings
-(`group-by`, `input`) are global only and cannot be overridden per path.
-
-**Merge semantics:** `hide-unchanged` and `fold-noop` are additive — once any layer
-sets them `true` they stay `true` (no lower layer can unset them). The `emoji` map
-is replaced wholesale by the last layer that sets it, not merged key-by-key.
-`overrides` are replaced wholesale by the innermost layer that sets them.
 
 ## GitHub Actions
 
@@ -238,10 +282,8 @@ steps:
     with:
       ndjson: plans.ndjson
       scope: infra
-      config: examples/terragrunt/.gruntcmt.yaml   # optional
-      # detail: resource          # PR comment fidelity (default)
-      # summary-detail: attribute # job summary fidelity (default)
-      # gruntcmt-version: v0.2.0  # pin the tool (default: latest)
+      ruleset: gruntcmt.yaml        # optional; path to your gruntcmt.yaml
+      # gruntcmt-version: v0.2.0   # pin the tool (default: latest)
 ```
 
 See [`examples/`](examples/) for a runnable terragrunt project and a full
@@ -251,7 +293,8 @@ rather wire the steps yourself, the raw recipes follow.
 ### PR comment — post or update in place
 
 `gruntcmt` always emits `<!-- gruntcmt:scope=<scope> -->` as line 1, serving as a
-stable marker. Use `gh api` to post or update the comment using that marker:
+stable marker. Use `gh api` to post or update the comment using that marker, or pass
+`--out gh` to have `gruntcmt` do it directly:
 
 ```yaml
 - name: Generate plan comment
@@ -262,20 +305,33 @@ stable marker. Use `gh api` to post or update the comment using that marker:
       ( cd "$unit" && terragrunt show -json plan.tfplan \
           | jq -c --arg n "$unit" '{name:$n, plan:.}' )
     done \
-      | gruntcmt --scope production --detail resource --commit "$GITHUB_SHA" \
+      | gruntcmt --scope production --ruleset gruntcmt.yaml \
+                 --commit "$GITHUB_SHA" --out gh
+```
+
+Or capture to a file and post manually:
+
+```yaml
+- name: Generate plan comment
+  env:
+    GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  run: |
+    for unit in production/networking/vpc production/networking/nat; do
+      ( cd "$unit" && terragrunt show -json plan.tfplan \
+          | jq -c --arg n "$unit" '{name:$n, plan:.}' )
+    done \
+      | gruntcmt --scope production --ruleset gruntcmt.yaml \
+                 --commit "$GITHUB_SHA" \
       > /tmp/comment.md
 
     MARKER='<!-- gruntcmt:scope=production -->'
     PR="${{ github.event.pull_request.number }}"
-    # Find an existing comment carrying our marker
     ID=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
           --jq ".[] | select(.body | contains(\"$MARKER\")) | .id" | head -n1)
     if [ -n "$ID" ]; then
-      # Update the existing comment in place
       gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$ID" \
         -f body="$(cat /tmp/comment.md)"
     else
-      # First run: create the comment
       gh pr comment "$PR" --body-file /tmp/comment.md
     fi
 ```
@@ -284,10 +340,11 @@ The marker `<!-- gruntcmt:scope=<scope> -->` is what enables update-in-place
 detection. Each scope has its own marker, so multiple pipelines posting to the
 same PR never collide. Re-runs update the existing comment in place.
 
-### Job summary — full attribute diff
+### Job summary
 
-The Actions job summary accepts up to 1 MiB per step; use `--detail attribute` here
-for the full diff without affecting the PR comment size:
+The Actions job summary accepts up to 1 MiB per step. Write the output to
+`$GITHUB_STEP_SUMMARY` using a ruleset that sets `attribute` detail for the units
+you care about:
 
 ```yaml
 - name: Write job summary
@@ -296,13 +353,10 @@ for the full diff without affecting the PR comment size:
       ( cd "$unit" && terragrunt show -json plan.tfplan \
           | jq -c --arg n "$unit" '{name:$n, plan:.}' )
     done \
-      | gruntcmt --scope production --detail attribute --commit "$GITHUB_SHA" \
+      | gruntcmt --scope production --ruleset gruntcmt.yaml \
+                 --commit "$GITHUB_SHA" \
       >> "$GITHUB_STEP_SUMMARY"
 ```
-
-**Two-surface pattern:** run `gruntcmt` twice — lean `--detail resource` for the PR
-comment, full `--detail attribute` for the job summary. `gruntcmt` never truncates;
-picking a fidelity that fits a surface's size limit is the operator's decision.
 
 ## Output Format
 
@@ -323,6 +377,49 @@ Output is GitHub-flavored markdown. Top to bottom:
 **Not in v1 output:** Resource drift and output changes are parsed into the
 analysis model but are not yet rendered in the markdown output; rendering them is
 roadmap.
+
+## Migrating from `overrides:`
+
+If you used the old `.gruntcmt.yaml` `overrides:` model, migrate to a `rules` array.
+Each `overrides` entry with a `path` + `detail` becomes a rule with per-action detail
+fields. The `**` catch-all rule replaces the old global `detail:` setting.
+
+Old:
+```yaml
+# .gruntcmt.yaml  (OLD — no longer supported)
+detail: resource
+overrides:
+  - path: "**/database/**"
+    detail: attribute
+  - path: "development/**"
+    detail: summary
+```
+
+New:
+```yaml
+# gruntcmt.yaml
+rules:
+  - path: "**"
+    create: resource
+    update: resource
+    delete: resource
+    replace: resource
+    noop: summary
+  - path: "**/database/**"
+    create: attribute
+    update: attribute
+    delete: attribute
+    replace: attribute
+  - path: "development/**"
+    create: summary
+    update: summary
+    delete: summary
+    replace: summary
+```
+
+Also rename the file from `.gruntcmt.yaml` to `gruntcmt.yaml`, and replace any
+`--config`/`--detail`/`--group-by`/`--no-config`/`--print-config` flags with
+`--ruleset`/`--print-ruleset`.
 
 ## Links
 

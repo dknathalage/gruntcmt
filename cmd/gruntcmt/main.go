@@ -14,11 +14,11 @@ import (
 	"strings"
 
 	"github.com/dknathalage/gruntcmt/internal/analyze"
-	"github.com/dknathalage/gruntcmt/internal/config"
 	"github.com/dknathalage/gruntcmt/internal/gh"
 	"github.com/dknathalage/gruntcmt/internal/input"
-	"github.com/dknathalage/gruntcmt/internal/plan"
 	"github.com/dknathalage/gruntcmt/internal/render"
+	"github.com/dknathalage/gruntcmt/internal/ruleset"
+	"gopkg.in/yaml.v3"
 )
 
 // version is overridable at build time via -ldflags "-X main.version=...".
@@ -38,23 +38,27 @@ func resolveVersion() string {
 	return version
 }
 
+func apiBaseURL() string {
+	if u := os.Getenv("GITHUB_API_URL"); u != "" {
+		return strings.TrimRight(u, "/")
+	}
+	return "https://api.github.com"
+}
+
 func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("gruntcmt", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var (
-		scope       = fs.String("scope", "", "scope label + marker key")
-		name        = fs.String("name", "plan", "unit name for a bare single plan")
-		groupBy     = fs.Int("group-by", 1, "leading path segments to group by")
-		detail      = fs.String("detail", "", "summary|resource|attribute (overrides config)")
-		inputMode   = fs.String("input", "", "auto|wrapped|plan")
-		commit      = fs.String("commit", "", "commit SHA to stamp in footer")
-		configPath  = fs.String("config", "", "explicit config file")
-		noConfig    = fs.Bool("no-config", false, "ignore all config files")
-		printConfig = fs.Bool("print-config", false, "print resolved config to stderr and exit")
-		out         = fs.String("out", "stdout", "output destination: stdout|gh")
-		repo        = fs.String("repo", "", "owner/name for --out gh (default $GITHUB_REPOSITORY)")
-		prNum       = fs.Int("pr", 0, "pull request number for --out gh (default: auto-detect in GitHub Actions)")
-		showVersion = fs.Bool("version", false, "print version and exit")
+		scope        = fs.String("scope", "", "scope label + marker key")
+		name         = fs.String("name", "plan", "unit name for a bare single plan")
+		inputMode    = fs.String("input", "", "auto|wrapped|plan")
+		commit       = fs.String("commit", "", "commit SHA to stamp in footer")
+		rulesetFlag  = fs.String("ruleset", "", "path to ruleset YAML file")
+		printRuleset = fs.Bool("print-ruleset", false, "print resolved ruleset to stderr and exit")
+		out          = fs.String("out", "stdout", "output destination: stdout|gh")
+		repo         = fs.String("repo", "", "owner/name for --out gh (default $GITHUB_REPOSITORY)")
+		prNum        = fs.Int("pr", 0, "pull request number for --out gh (default: auto-detect in GitHub Actions)")
+		showVersion  = fs.Bool("version", false, "print version and exit")
 	)
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -64,84 +68,48 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 0
 	}
 
-	// Resolve config layers.
-	var layers []config.File
-	if !*noConfig {
-		if home, err := os.UserConfigDir(); err == nil {
-			if f, err := config.LoadFile(home + "/gruntcmt/config.yaml"); err == nil {
-				layers = append(layers, f)
-			}
-		}
-		if p, ok := config.Discover(cwd()); ok {
-			f, err := config.LoadFile(p)
-			if err != nil {
-				fmt.Fprintln(stderr, "config:", err)
-				return 1
-			}
-			layers = append(layers, f)
-		}
-		if *configPath != "" {
-			f, err := config.LoadFile(*configPath)
-			if err != nil {
-				fmt.Fprintln(stderr, "config:", err)
-				return 1
-			}
-			layers = append(layers, f)
+	// Load ruleset: from --ruleset, else ./gruntcmt.yaml if it exists, else empty.
+	var rs ruleset.Ruleset
+	path := *rulesetFlag
+	if path == "" {
+		if _, err := os.Stat("gruntcmt.yaml"); err == nil {
+			path = "gruntcmt.yaml"
 		}
 	}
-	merged := config.Merge(layers...)
-
-	s := config.Settings{
-		Scope: *scope, Name: *name, Commit: *commit,
-		GroupBy: *groupBy, Render: merged.Render, Overrides: merged.Overrides,
-		Detail: plan.FidelityResource,
-	}
-	if merged.GroupBy != nil && !flagSet(fs, "group-by") {
-		s.GroupBy = *merged.GroupBy
-	}
-	if merged.Detail != "" {
-		f, err := config.ParseFidelity(merged.Detail)
+	if path != "" {
+		loaded, err := ruleset.Load(path)
 		if err != nil {
-			fmt.Fprintln(stderr, "config:", err)
+			fmt.Fprintln(stderr, "ruleset:", err)
 			return 1
 		}
-		s.Detail = f
-	}
-	if *detail != "" {
-		f, err := config.ParseFidelity(*detail)
-		if err != nil {
-			fmt.Fprintln(stderr, err)
-			return 1
-		}
-		s.Detail, s.DetailSet = f, true
+		rs = loaded
 	}
 
-	// Resolve input mode string before --print-config so it is available.
-	resolvedInput := pick(*inputMode, merged.Input)
+	// Resolve base if set.
+	if rs.Base != "" {
+		f := &ruleset.Fetcher{HTTP: http.DefaultClient, APIURL: apiBaseURL(), Token: ruleset.DefaultToken()}
+		merged, err := ruleset.Resolve(context.Background(), rs, f)
+		if err != nil {
+			fmt.Fprintln(stderr, "ruleset:", err)
+			return 1
+		}
+		rs = merged
+	}
+
+	if *printRuleset {
+		out, err := yaml.Marshal(rs)
+		if err != nil {
+			fmt.Fprintln(stderr, "ruleset: marshal:", err)
+			return 1
+		}
+		stderr.Write(out) //nolint:errcheck
+		return 0
+	}
+
+	// Resolve input mode.
+	resolvedInput := *inputMode
 	if resolvedInput == "" {
 		resolvedInput = "auto"
-	}
-	s.Input = resolvedInput
-
-	if *printConfig {
-		detailName := "resource"
-		switch s.Detail {
-		case plan.FidelitySummary:
-			detailName = "summary"
-		case plan.FidelityAttribute:
-			detailName = "attribute"
-		}
-		fmt.Fprintf(stderr, "scope:          %s\n", s.Scope)
-		fmt.Fprintf(stderr, "name:           %s\n", s.Name)
-		fmt.Fprintf(stderr, "group-by:       %d\n", s.GroupBy)
-		fmt.Fprintf(stderr, "detail:         %s\n", detailName)
-		fmt.Fprintf(stderr, "input:          %s\n", s.Input)
-		fmt.Fprintf(stderr, "commit:         %s\n", s.Commit)
-		fmt.Fprintf(stderr, "render.title:        %s\n", s.Render.Title)
-		fmt.Fprintf(stderr, "render.hide-unchanged: %v\n", s.Render.HideUnchanged)
-		fmt.Fprintf(stderr, "render.fold-noop:      %v\n", s.Render.FoldNoop)
-		fmt.Fprintf(stderr, "overrides:      %d entries\n", len(s.Overrides))
-		return 0
 	}
 
 	mode := input.ModeAuto
@@ -162,25 +130,33 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "gruntcmt:", err)
 		return 1
 	}
-	report := analyze.Analyze(units, loadErrs, s)
-	md := render.Render(report, s)
+
+	reports := analyze.Analyze(units, loadErrs, rs, *scope)
+	for i := range reports {
+		reports[i].Commit = *commit
+	}
 
 	switch *out {
 	case "", "stdout":
-		io.WriteString(stdout, md)
+		for i, rep := range reports {
+			if i > 0 {
+				io.WriteString(stdout, "\n") //nolint:errcheck
+			}
+			io.WriteString(stdout, render.Render(rep)) //nolint:errcheck
+		}
 		return 0
 	case "gh":
-		return postToGitHub(stderr, s.Scope, md, *repo, *prNum)
+		return postReports(stderr, reports, *repo, *prNum)
 	default:
 		fmt.Fprintln(stderr, "invalid --out (want stdout|gh)")
 		return 1
 	}
 }
 
-// postToGitHub creates or updates the PR comment in place via the GitHub REST API.
+// postReports creates or updates PR comments for each report via the GitHub REST API.
 // Token comes from $GITHUB_TOKEN/$GH_TOKEN; repo/pr default to the GitHub Actions
-// environment. On success it prints the comment URL to stderr and returns 0.
-func postToGitHub(stderr io.Writer, scope, body, repo string, pr int) int {
+// environment. On success it prints each comment URL to stderr. Returns 1 on any failure.
+func postReports(stderr io.Writer, reports []analyze.Report, repo string, pr int) int {
 	token := firstEnv("GITHUB_TOKEN", "GH_TOKEN")
 	if token == "" {
 		fmt.Fprintln(stderr, "gruntcmt: --out gh needs a token in $GITHUB_TOKEN or $GH_TOKEN")
@@ -200,17 +176,16 @@ func postToGitHub(stderr io.Writer, scope, body, repo string, pr int) int {
 		fmt.Fprintln(stderr, "gruntcmt: --out gh needs --pr or a detectable pull request (GITHUB_REF/GITHUB_EVENT_PATH)")
 		return 1
 	}
-	apiURL := os.Getenv("GITHUB_API_URL")
-	if apiURL == "" {
-		apiURL = "https://api.github.com"
+	client := &gh.Client{HTTP: http.DefaultClient, APIURL: apiBaseURL(), Token: token}
+	for _, rep := range reports {
+		body := render.Render(rep)
+		url, err := client.UpsertComment(context.Background(), repo, pr, render.Marker(rep.Scope), body)
+		if err != nil {
+			fmt.Fprintln(stderr, "gruntcmt:", err)
+			return 1
+		}
+		fmt.Fprintln(stderr, "gruntcmt: commented at", url)
 	}
-	client := &gh.Client{HTTP: http.DefaultClient, APIURL: strings.TrimRight(apiURL, "/"), Token: token}
-	url, err := client.UpsertComment(context.Background(), repo, pr, render.Marker(scope), body)
-	if err != nil {
-		fmt.Fprintln(stderr, "gruntcmt:", err)
-		return 1
-	}
-	fmt.Fprintln(stderr, "gruntcmt: commented at", url)
 	return 0
 }
 
@@ -250,30 +225,6 @@ func detectPR() int {
 		}
 	}
 	return 0
-}
-
-func flagSet(fs *flag.FlagSet, name string) bool {
-	seen := false
-	fs.Visit(func(f *flag.Flag) {
-		if f.Name == name {
-			seen = true
-		}
-	})
-	return seen
-}
-
-func pick(a, b string) string {
-	if a != "" {
-		return a
-	}
-	return b
-}
-
-func cwd() string {
-	if d, err := os.Getwd(); err == nil {
-		return d
-	}
-	return "."
 }
 
 func main() {

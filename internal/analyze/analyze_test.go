@@ -3,8 +3,8 @@ package analyze
 import (
 	"testing"
 
-	"github.com/dknathalage/gruntcmt/internal/config"
 	"github.com/dknathalage/gruntcmt/internal/plan"
+	"github.com/dknathalage/gruntcmt/internal/ruleset"
 )
 
 func unit(name string, acts ...plan.Action) plan.Unit {
@@ -12,16 +12,154 @@ func unit(name string, acts ...plan.Action) plan.Unit {
 	for _, a := range acts {
 		u.Changes = append(u.Changes, plan.ResourceChange{Action: a})
 	}
+	u.Counts = plan.Count(u.Changes)
 	return u
 }
 
+// ---- New tests (Task 5) ----
+
+func TestAnalyzeSplitsDedicatedComment(t *testing.T) {
+	rs, _ := ruleset.Parse([]byte(`
+rules:
+  - path: "**"
+    group-by: 1
+    delete: attribute
+  - path: "**/security/**"
+    dedicated-comment: true
+    scope: security
+    delete: attribute
+`))
+	units := []plan.Unit{
+		unit("prod/networking", plan.ActionCreate),
+		unit("prod/security/iam", plan.ActionDelete),
+	}
+	reports := Analyze(units, nil, rs, "infra")
+	if len(reports) != 2 {
+		t.Fatalf("reports = %d, want 2 (main + security)", len(reports))
+	}
+	if reports[0].Scope != "infra" {
+		t.Errorf("main scope = %q", reports[0].Scope)
+	}
+	if reports[1].Scope != "security" {
+		t.Errorf("dedicated scope = %q", reports[1].Scope)
+	}
+
+	// Assert unit placement: main report contains networking, not security
+	mainUnitNames := make(map[string]bool)
+	for _, g := range reports[0].Groups {
+		for _, u := range g.Units {
+			mainUnitNames[u.Name] = true
+		}
+	}
+	if !mainUnitNames["prod/networking"] {
+		t.Errorf("main report missing prod/networking")
+	}
+	if mainUnitNames["prod/security/iam"] {
+		t.Errorf("main report should not contain prod/security/iam")
+	}
+
+	// Assert dedicated report contains exactly security unit
+	dedicatedUnitNames := make(map[string]bool)
+	for _, g := range reports[1].Groups {
+		for _, u := range g.Units {
+			dedicatedUnitNames[u.Name] = true
+		}
+	}
+	if !dedicatedUnitNames["prod/security/iam"] {
+		t.Errorf("security report missing prod/security/iam")
+	}
+	if len(dedicatedUnitNames) != 1 {
+		t.Errorf("security report has %d units, want 1", len(dedicatedUnitNames))
+	}
+}
+
+func TestAnalyzeStampsPerChangeDetail(t *testing.T) {
+	rs, _ := ruleset.Parse([]byte(`
+rules:
+  - path: "**"
+    create: summary
+    delete: attribute
+`))
+	u := unit("prod/db", plan.ActionCreate, plan.ActionDelete)
+	reports := Analyze([]plan.Unit{u}, nil, rs, "infra")
+	got := reports[0].Groups[0].Units[0].Changes
+	if got[0].Detail != plan.FidelitySummary || got[1].Detail != plan.FidelityAttribute {
+		t.Fatalf("details = %v,%v", got[0].Detail, got[1].Detail)
+	}
+}
+
+func TestAnalyzeDoesNotMutateCallerInput(t *testing.T) {
+	rs, _ := ruleset.Parse([]byte(`
+rules:
+  - path: "**"
+    create: summary
+    delete: attribute
+`))
+	u := unit("prod/db", plan.ActionCreate, plan.ActionDelete)
+	units := []plan.Unit{u}
+	// Before Analyze, the caller's Changes should have zero Detail (default uninitialized value)
+	originalDetail0 := units[0].Changes[0].Detail
+	originalDetail1 := units[0].Changes[1].Detail
+	_ = Analyze(units, nil, rs, "infra")
+	// After Analyze, the caller's units slice should still have unchanged Detail values
+	if units[0].Changes[0].Detail != originalDetail0 {
+		t.Errorf("after Analyze, units[0].Changes[0].Detail changed from %v to %v (caller input must not be mutated)", originalDetail0, units[0].Changes[0].Detail)
+	}
+	if units[0].Changes[1].Detail != originalDetail1 {
+		t.Errorf("after Analyze, units[0].Changes[1].Detail changed from %v to %v (caller input must not be mutated)", originalDetail1, units[0].Changes[1].Detail)
+	}
+}
+
+func TestAnalyzeDedupesScopeCollision(t *testing.T) {
+	// A dedicated rule whose scope equals the mainScope passed to Analyze.
+	// Should produce exactly ONE report with that scope, not two.
+	rs, _ := ruleset.Parse([]byte(`
+rules:
+  - path: "**"
+    group-by: 1
+  - path: "**/infra/**"
+    dedicated-comment: true
+    scope: infra
+`))
+	units := []plan.Unit{
+		unit("infra/vpc", plan.ActionCreate),
+		unit("infra/subnet", plan.ActionUpdate),
+	}
+	reports := Analyze(units, nil, rs, "infra")
+	if len(reports) != 1 {
+		t.Fatalf("reports = %d, want 1 (no duplicate for colliding scope)", len(reports))
+	}
+	if reports[0].Scope != "infra" {
+		t.Errorf("scope = %q, want infra", reports[0].Scope)
+	}
+	// Both units should be in the single report.
+	var total int
+	for _, g := range reports[0].Groups {
+		total += len(g.Units)
+	}
+	if total != 2 {
+		t.Errorf("total units in report = %d, want 2", total)
+	}
+}
+
+// ---- Updated pre-existing tests (old Analyze(config.Settings) → new signature) ----
+
 func TestGroupByDepth(t *testing.T) {
+	rs, _ := ruleset.Parse([]byte(`
+rules:
+  - path: "**"
+    group-by: 1
+`))
 	units := []plan.Unit{
 		unit("production/database/primary", plan.ActionDelete),
 		unit("production/networking", plan.ActionCreate),
 		unit("staging/db1", plan.ActionNoOp),
 	}
-	r := Analyze(units, nil, config.Settings{GroupBy: 1, Detail: plan.FidelityResource})
+	reports := Analyze(units, nil, rs, "main")
+	if len(reports) != 1 {
+		t.Fatalf("reports = %d, want 1", len(reports))
+	}
+	r := reports[0]
 	if len(r.Groups) != 2 {
 		t.Fatalf("groups = %d, want 2", len(r.Groups))
 	}
@@ -32,11 +170,20 @@ func TestGroupByDepth(t *testing.T) {
 }
 
 func TestGroupByTwoAndSingletonShortPath(t *testing.T) {
+	rs, _ := ruleset.Parse([]byte(`
+rules:
+  - path: "**"
+    group-by: 2
+`))
 	units := []plan.Unit{
 		unit("production/database/primary", plan.ActionUpdate),
 		unit("production/networking", plan.ActionCreate), // only 2 segments
 	}
-	r := Analyze(units, nil, config.Settings{GroupBy: 2, Detail: plan.FidelityResource})
+	reports := Analyze(units, nil, rs, "main")
+	if len(reports) != 1 {
+		t.Fatalf("reports = %d, want 1", len(reports))
+	}
+	r := reports[0]
 	keys := map[string]bool{}
 	for _, g := range r.Groups {
 		keys[g.Key] = true
@@ -47,15 +194,29 @@ func TestGroupByTwoAndSingletonShortPath(t *testing.T) {
 }
 
 func TestPerUnitDetailResolved(t *testing.T) {
-	s := config.Settings{GroupBy: 1, Detail: plan.FidelityResource,
-		Overrides: []config.Override{{Path: "**/database/**", Detail: "attribute"}}}
-	r := Analyze([]plan.Unit{unit("production/database/primary", plan.ActionUpdate)}, nil, s)
-	if r.Groups[0].Units[0].Detail != plan.FidelityAttribute {
-		t.Errorf("detail = %v, want attribute", r.Groups[0].Units[0].Detail)
+	rs, _ := ruleset.Parse([]byte(`
+rules:
+  - path: "**"
+    group-by: 1
+    update: resource
+  - path: "**/database/**"
+    update: attribute
+`))
+	reports := Analyze([]plan.Unit{unit("production/database/primary", plan.ActionUpdate)}, nil, rs, "main")
+	if len(reports) != 1 {
+		t.Fatalf("reports = %d, want 1", len(reports))
+	}
+	if reports[0].Groups[0].Units[0].Changes[0].Detail != plan.FidelityAttribute {
+		t.Errorf("detail = %v, want attribute", reports[0].Groups[0].Units[0].Changes[0].Detail)
 	}
 }
 
 func TestTotalsAndGroupCountsAccumulate(t *testing.T) {
+	rs, _ := ruleset.Parse([]byte(`
+rules:
+  - path: "**"
+    group-by: 1
+`))
 	units := []plan.Unit{
 		{
 			Name:    "a/x",
@@ -68,7 +229,11 @@ func TestTotalsAndGroupCountsAccumulate(t *testing.T) {
 			Changes: []plan.ResourceChange{},
 		},
 	}
-	r := Analyze(units, nil, config.Settings{GroupBy: 1, Detail: plan.FidelityResource})
+	reports := Analyze(units, nil, rs, "main")
+	if len(reports) != 1 {
+		t.Fatalf("reports = %d, want 1", len(reports))
+	}
+	r := reports[0]
 
 	// Check that group counts accumulate
 	if len(r.Groups) != 1 {
@@ -86,11 +251,20 @@ func TestTotalsAndGroupCountsAccumulate(t *testing.T) {
 }
 
 func TestGroupByZeroFlat(t *testing.T) {
+	rs, _ := ruleset.Parse([]byte(`
+rules:
+  - path: "**"
+    group-by: 0
+`))
 	units := []plan.Unit{
 		unit("a/x", plan.ActionCreate),
 		unit("b/y", plan.ActionDelete),
 	}
-	r := Analyze(units, nil, config.Settings{GroupBy: 0, Detail: plan.FidelityResource})
+	reports := Analyze(units, nil, rs, "main")
+	if len(reports) != 1 {
+		t.Fatalf("reports = %d, want 1", len(reports))
+	}
+	r := reports[0]
 
 	// GroupBy:0 should produce exactly one group with empty key
 	if len(r.Groups) != 1 {
@@ -106,6 +280,11 @@ func TestGroupByZeroFlat(t *testing.T) {
 }
 
 func TestZeroChangeUnitSortsLast(t *testing.T) {
+	rs, _ := ruleset.Parse([]byte(`
+rules:
+  - path: "**"
+    group-by: 1
+`))
 	units := []plan.Unit{
 		unit("a/destroy", plan.ActionDelete),
 		{
@@ -113,7 +292,11 @@ func TestZeroChangeUnitSortsLast(t *testing.T) {
 			Changes: []plan.ResourceChange{}, // No changes at all
 		},
 	}
-	r := Analyze(units, nil, config.Settings{GroupBy: 1, Detail: plan.FidelityResource})
+	reports := Analyze(units, nil, rs, "main")
+	if len(reports) != 1 {
+		t.Fatalf("reports = %d, want 1", len(reports))
+	}
+	r := reports[0]
 
 	if len(r.Groups) != 1 {
 		t.Fatalf("expected 1 group, got %d", len(r.Groups))

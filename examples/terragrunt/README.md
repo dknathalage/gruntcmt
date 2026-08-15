@@ -1,86 +1,81 @@
-# Real terragrunt example
+# Terragrunt numbered-scenario example
 
-A tiny but real terragrunt project you can plan locally — no cloud account, no
-credentials. Every unit uses the `random` provider, so `plan`/`apply` produce
-genuine resource changes that gruntcmt summarizes.
+A real terragrunt project you can plan locally — no cloud account, no credentials.
+Every unit uses the built-in `terraform_data` resource (no provider needed), so
+`plan`/`apply` produce genuine resource changes that gruntcmt summarizes via a
+ruleset.
 
 ```
-root.hcl                       # shared root config (included by every unit)
-modules/app/main.tf            # random_pet / random_id / random_password module
+root.hcl                          # shared root config — injects PHASE env var
+modules/scenario/main.tf          # terraform_data module driven by scenario + phase
 live/
-  production/networking/       # instance_count = 3
-  production/database/         # engine_version input keys a replaceable resource
-  staging/cache/               # instance_count = 2
-.gruntcmt.yaml                 # group by env, fold no-ops, attribute detail for production/**
-plan-to-ndjson.sh             # plan every unit -> gruntcmt wrapped-NDJSON
-demo-changes.sh               # apply, then mutate inputs to show destroys/replaces
+  01-create/                      # create  — appears at PHASE=changed
+  02-update/                      # in-place update (input v1 -> v2)
+  03-replace/                     # forces-replacement via triggers_replace
+  04-destroy/                     # present at baseline, gone at changed
+  05-noop/                        # no change
+  06-security/                    # create — rendered in a dedicated security comment
+gruntcmt.yaml                     # ruleset: group-by 1, per-type fidelity + security rule
+plan-scenarios.sh                 # apply baseline + plan changed -> gruntcmt NDJSON
 ```
 
 ## Prerequisites
 
-`gruntcmt`, plus OpenTofu (or Terraform) and terragrunt. Get the pinned tools with
-mise:
+`gruntcmt`, plus OpenTofu and terragrunt. Get the pinned tools with mise:
 
 ```bash
 cd examples/terragrunt
 mise install          # OpenTofu 1.12.3 + terragrunt 1.0.8
 ```
 
-## Plan and summarize (first run: all creates)
+## Plan and summarize all scenarios
 
 ```bash
-./plan-to-ndjson.sh | gruntcmt --scope infra --config .gruntcmt.yaml
+./plan-scenarios.sh 2>/dev/null | gruntcmt --scope scenarios --ruleset gruntcmt.yaml
 ```
 
-`plan-to-ndjson.sh` plans each unit and emits one wrapped-NDJSON line per unit
-(`{"name":"production/database","plan":{…}}`). On a clean project every unit is a
-create:
+`plan-scenarios.sh` applies a baseline state for each unit, then plans at
+`PHASE=changed` so each unit produces its designed change type. It emits one
+wrapped-NDJSON line per unit (`{"name":"01-create","plan":{…}}`).
 
-```markdown
-### 🟢 Terragrunt plan — `infra` · 3 units · 0 destroy · 12 add · 0 change
+Expected output — two documents:
 
-| Group | Units | Add | Change | Destroy | |
-|---|---|---|---|---|---|
-| `production` | 2 | 8 | 0 | 0 | ✅ |
-| `staging` | 1 | 4 | 0 | 0 | ✅ |
+1. **Main comment** (`scope=scenarios`) — a table row per numbered scenario:
+   - `01-create`: 1 add (summary, not expanded)
+   - `02-update`: resource-level update line
+   - `03-replace`: attribute diff with `# forces replacement`
+   - `04-destroy`: attribute diff showing deleted values
+   - `05-noop`: folded to one line
+
+2. **Dedicated security comment** (`scope=security`) — `06-security` with full
+   attribute-level create diff.
+
+## How the ruleset works
+
+`gruntcmt.yaml` demonstrates two rules:
+
+```yaml
+rules:
+  - path: "**"
+    title: "gruntcmt scenarios"
+    group-by: 1
+    create: summary     # creates counted only (no expansion)
+    update: resource    # updates shown at resource level
+    delete: attribute   # destroys expanded to full attribute diffs
+    replace: attribute  # replacements expanded to full attribute diffs
+    noop: summary       # no-ops folded
+  - path: "**/06-security"
+    dedicated-comment: true
+    scope: security
+    title: "Security plan"
+    create: attribute   # security creates shown with full attribute detail
+    delete: attribute
 ```
 
-## Show destroys and replacements (`demo-changes.sh`)
-
-To see gruntcmt's headline feature — surfacing destructive changes — apply once,
-then re-plan against a mutated config. `demo-changes.sh` does this and restores the
-inputs afterwards (the "resources" are just random values, so applying is safe):
-
-```bash
-./demo-changes.sh | gruntcmt --scope infra --config .gruntcmt.yaml
-```
-
-It bumps `production/database`'s `engine_version` (forces a replacement), shrinks
-`production/networking` by one instance (a destroy), and leaves `staging/cache`
-untouched (a no-op that folds away):
-
-```markdown
-### 🔴 Terragrunt plan — `infra` · 3 units · 2 destroy · 1 add · 0 change
-
-| Group | Units | Add | Change | Destroy | |
-|---|---|---|---|---|---|
-| `production` | 2 | 1 | 0 | 2 | ⚠️ **destroys** |
-| `staging` | 1 | 0 | 0 | 0 | ➖ no-op |
-
-⚠️ **2 destructive changes** — review carefully.
-```
-```diff
--/+ random_id.release
-    ~ keepers = {"engine_version":"14.7"} -> {"engine_version":"15.4"}  # forces replacement
-- random_pet.instance[2]
-    - id = prod-net-intimate-beetle
-```
-
-Because `.gruntcmt.yaml` maps `production/**` to attribute fidelity, production
-units expand into full before → after diffs while the no-op staging group folds to
-a single line.
+The second rule overrides the first for `06-security`, routing it to a separate
+dedicated comment with its own scope and attribute fidelity.
 
 ## In CI
 
-See `../workflows/terragrunt-plan.yml` for a workflow that runs this and posts the
-result with the reusable action (`uses: dknathalage/gruntcmt@v1`).
+See `.github/workflows/pr-demo.yml` — it runs `./plan-scenarios.sh` and posts
+both comments via `--out gh`, plus writes the job summary.

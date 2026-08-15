@@ -5,27 +5,27 @@ import (
 	"strings"
 
 	"github.com/dknathalage/gruntcmt/internal/analyze"
-	"github.com/dknathalage/gruntcmt/internal/config"
 	"github.com/dknathalage/gruntcmt/internal/plan"
 )
 
-func emoji(s config.Settings, key, def string) string {
-	if v, ok := s.Render.Emoji[key]; ok {
-		return v
-	}
-	return def
-}
+// Built-in emoji constants — no override map.
+const (
+	emojiDestroy = "🔴"
+	emojiChange  = "🟡"
+	emojiAdd     = "🟢"
+	emojiNoop    = "➖"
+)
 
-func headEmoji(r analyze.Report, s config.Settings) string {
+func headEmoji(r analyze.Report) string {
 	switch {
 	case r.Totals.Destroy > 0 || r.Totals.Replace > 0:
-		return emoji(s, "destroy", "🔴")
+		return emojiDestroy
 	case r.Totals.Change > 0:
-		return emoji(s, "change", "🟡")
+		return emojiChange
 	case r.Totals.Add > 0:
-		return emoji(s, "add", "🟢")
+		return emojiAdd
 	default:
-		return emoji(s, "noop", "➖")
+		return emojiNoop
 	}
 }
 
@@ -44,17 +44,6 @@ func actionGlyph(a plan.Action) string {
 	}
 }
 
-// hasRenderable reports whether the unit has at least one change that would
-// be written into the diff block (i.e. not NoOp or Read).
-func hasRenderable(u plan.Unit) bool {
-	for _, c := range u.Changes {
-		if c.Action != plan.ActionNoOp && c.Action != plan.ActionRead {
-			return true
-		}
-	}
-	return false
-}
-
 // groupStatusCell returns the status cell string for a group row.
 func groupStatusCell(g analyze.Group) string {
 	if g.Counts.Destroy > 0 {
@@ -66,17 +55,6 @@ func groupStatusCell(g analyze.Group) string {
 	return "✅"
 }
 
-// unitSeverity returns the max severity across all changes in a unit.
-func unitSeverity(u plan.Unit) int {
-	sev := 0
-	for _, c := range u.Changes {
-		if s := c.Action.Severity(); s > sev {
-			sev = s
-		}
-	}
-	return sev
-}
-
 // Marker returns the HTML comment gruntcmt emits as the first output line. It is
 // the stable per-scope identity used for update-in-place; callers that post the
 // comment themselves (e.g. --out gh) match on this exact string.
@@ -84,7 +62,15 @@ func Marker(scope string) string {
 	return fmt.Sprintf("<!-- gruntcmt:scope=%s -->", scope)
 }
 
-func Render(r analyze.Report, s config.Settings) string {
+// Render produces the full Markdown comment body for a plan report.
+// Per-change Detail fidelity controls what appears in the diff blocks:
+//   - FidelitySummary changes are omitted from diff bodies (counted only in the table).
+//   - FidelityResource changes emit address + action glyph only.
+//   - FidelityAttribute changes emit address + attribute lines.
+//
+// A unit with no Changes at all (true no-op) renders as a folded "no changes" one-liner.
+// A unit with changes but ALL at FidelitySummary renders nothing (table-only).
+func Render(r analyze.Report) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n", Marker(r.Scope))
 	title := r.Title
@@ -98,11 +84,10 @@ func Render(r analyze.Report, s config.Settings) string {
 		totalUnits += len(g.Units)
 	}
 
-	// Finding 1: headline includes N units.
 	fmt.Fprintf(&b, "### %s %s — `%s` · %d units · %d destroy · %d add · %d change\n\n",
-		headEmoji(r, s), title, r.Scope, totalUnits, r.Totals.Destroy, r.Totals.Add, r.Totals.Change)
+		headEmoji(r), title, r.Scope, totalUnits, r.Totals.Destroy, r.Totals.Add, r.Totals.Change)
 
-	// Finding 2: summary table with trailing status column (6 columns).
+	// Summary table with trailing status column.
 	b.WriteString("| Group | Units | Add | Change | Destroy | |\n|---|---|---|---|---|---|\n")
 	for _, g := range r.Groups {
 		key := g.Key
@@ -123,7 +108,7 @@ func Render(r analyze.Report, s config.Settings) string {
 	}
 
 	for _, g := range r.Groups {
-		renderGroup(&b, g, s)
+		renderGroup(&b, g)
 	}
 
 	if len(r.LoadErrors) > 0 {
@@ -142,62 +127,60 @@ func Render(r analyze.Report, s config.Settings) string {
 	return b.String()
 }
 
-func renderGroup(b *strings.Builder, g analyze.Group, s config.Settings) {
-	// summary fidelity groups contribute only to the table.
-	// NOTE: The blank lines surrounding inner/outer <details> tags are required
-	// for GitHub to render nested folds as block-level elements, not inline text.
-	anyDetail := false
-	for _, u := range g.Units {
-		if u.Detail != plan.FidelitySummary {
-			anyDetail = true
-		}
-	}
-	if !anyDetail {
-		return
+// unitBody renders the body for a single unit and returns it. Returns "" if
+// the unit should be suppressed (has changes but all are FidelitySummary).
+// Returns a "no changes" one-liner if the unit has no changes at all.
+func unitBody(u plan.Unit) string {
+	// True no-op: unit has no changes at all.
+	if len(u.Changes) == 0 {
+		return fmt.Sprintf("<details><summary><code>%s</code> — no changes</summary>\n\nNo changes.\n\n</details>\n\n", u.Name)
 	}
 
-	// Finding 3: fold-noop — entire no-op group renders as a collapsed one-liner.
-	if s.Render.FoldNoop && g.Severity == 0 {
-		fmt.Fprintf(b, "<details><summary>➖ <code>%s</code> — %d units · no changes</summary>\n\nNo changes.\n\n</details>\n\n", g.Key, len(g.Units))
+	// Collect renderable changes (Detail != FidelitySummary).
+	var renderable []plan.ResourceChange
+	for _, c := range u.Changes {
+		if c.Detail != plan.FidelitySummary {
+			renderable = append(renderable, c)
+		}
+	}
+
+	// All changes are summary-fidelity → render nothing (table-only).
+	if len(renderable) == 0 {
+		return ""
+	}
+
+	// Render the unit diff block with only renderable changes.
+	var b strings.Builder
+	fmt.Fprintf(&b, "<details><summary><code>%s</code></summary>\n\n```diff\n", u.Name)
+	for _, c := range renderable {
+		fmt.Fprintf(&b, "%s %s\n", actionGlyph(c.Action), c.Address)
+		if c.Detail == plan.FidelityAttribute {
+			for _, a := range c.Attributes {
+				renderAttr(&b, a)
+			}
+			// Unchanged attributes are always omitted — no count line.
+		}
+	}
+	b.WriteString("```\n</details>\n\n")
+	return b.String()
+}
+
+func renderGroup(b *strings.Builder, g analyze.Group) {
+	// Collect unit bodies; skip units that produce nothing (all-summary changes).
+	var bodies []string
+	for _, u := range g.Units {
+		if body := unitBody(u); body != "" {
+			bodies = append(bodies, body)
+		}
+	}
+	// Group renders only if at least one unit produced a body.
+	if len(bodies) == 0 {
 		return
 	}
 
 	fmt.Fprintf(b, "<details><summary><code>%s</code> — %d units</summary>\n\n", g.Key, len(g.Units))
-	for _, u := range g.Units {
-		if u.Detail == plan.FidelitySummary {
-			continue
-		}
-
-		// Finding 3: fold-noop — no-op unit renders as a collapsed one-liner.
-		if s.Render.FoldNoop && unitSeverity(u) == 0 {
-			fmt.Fprintf(b, "<details><summary><code>%s</code> — no changes</summary>\n\n</details>\n\n", u.Name)
-			continue
-		}
-
-		// If every change is no-op/read, emit a "no changes" one-liner instead
-		// of an empty diff block (regardless of FoldNoop setting).
-		if !hasRenderable(u) {
-			fmt.Fprintf(b, "<details><summary><code>%s</code> — no changes</summary>\n\nNo changes.\n\n</details>\n\n", u.Name)
-			continue
-		}
-
-		fmt.Fprintf(b, "<details><summary><code>%s</code></summary>\n\n```diff\n", u.Name)
-		for _, c := range u.Changes {
-			// Finding 4: skip no-op and read resources (they are noise).
-			if c.Action == plan.ActionNoOp || c.Action == plan.ActionRead {
-				continue
-			}
-			fmt.Fprintf(b, "%s %s\n", actionGlyph(c.Action), c.Address)
-			if u.Detail == plan.FidelityAttribute {
-				for _, a := range c.Attributes {
-					renderAttr(b, a)
-				}
-				if s.Render.HideUnchanged && c.Unchanged > 0 {
-					fmt.Fprintf(b, "    # (%d unchanged attributes hidden)\n", c.Unchanged)
-				}
-			}
-		}
-		b.WriteString("```\n</details>\n\n")
+	for _, body := range bodies {
+		b.WriteString(body)
 	}
 	b.WriteString("</details>\n\n")
 }

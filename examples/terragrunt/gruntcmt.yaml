@@ -1,0 +1,13 @@
+# The shared default `**` rule lives in base.yaml, fetched from this repo and
+# merged UNDER the local rules below (local wins under last-match-wins). Pinned to
+# the base file's commit SHA so it resolves the same forever.
+base: dknathalage/gruntcmt//examples/terragrunt/base.yaml@9bdfaa2e61b38e651f316ea7c0c6aa1a8f4ecffa
+
+rules:
+  # Local override: pull the security unit into its own comment, at full detail.
+  - path: "**/06-security"
+    dedicated-comment: true
+    scope: security
+    title: "Security plan"
+    create: attribute
+    delete: attribute

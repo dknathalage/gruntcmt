@@ -58,3 +58,18 @@ func TestSeverityOrdering(t *testing.T) {
 		t.Fatal("replace should rank equal to delete")
 	}
 }
+
+func TestResourceChangeHasDetailField(t *testing.T) {
+	c := ResourceChange{Detail: FidelityAttribute}
+	if c.Detail != FidelityAttribute {
+		t.Fatal("Detail field missing or wrong")
+	}
+}
+
+func TestCountExported(t *testing.T) {
+	result := Count([]ResourceChange{{Action: ActionCreate}})
+	expected := Counts{Add: 1}
+	if result != expected {
+		t.Fatalf("Count([]ResourceChange{{Action: ActionCreate}}) = %+v, want %+v", result, expected)
+	}
+}
