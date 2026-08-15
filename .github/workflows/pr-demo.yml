@@ -40,9 +40,10 @@ jobs:
 
       - name: Build gruntcmt from this PR
         run: |
-          mkdir -p "$HOME/.local/bin"
-          go build -o "$HOME/.local/bin/gruntcmt" ./cmd/gruntcmt
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          go build -o "$RUNNER_TEMP/gruntcmt" ./cmd/gruntcmt
+          # Reference by absolute path so it can't be shadowed by a mise `gruntcmt`
+          # shim (the repo's own mise.toml declares the go: backend).
+          echo "GRUNTCMT=$RUNNER_TEMP/gruntcmt" >> "$GITHUB_ENV"
 
       # OpenTofu + terragrunt, pinned in examples/terragrunt/mise.toml.
       - uses: jdx/mise-action@v2
@@ -60,8 +61,8 @@ jobs:
           eval "$(mise activate bash)"
           ./plan-to-ndjson.sh > plans.ndjson
           # PR comment (resource fidelity) + job summary (attribute fidelity)
-          gruntcmt --scope demo-create --detail resource --commit "$GITHUB_SHA" --out gh < plans.ndjson
-          gruntcmt --scope demo-create --detail attribute --commit "$GITHUB_SHA" < plans.ndjson >> "$GITHUB_STEP_SUMMARY"
+          "$GRUNTCMT" --scope demo-create --detail resource --commit "$GITHUB_SHA" --out gh < plans.ndjson
+          "$GRUNTCMT" --scope demo-create --detail attribute --commit "$GITHUB_SHA" < plans.ndjson >> "$GITHUB_STEP_SUMMARY"
 
       - name: Scenario B — apply + mutate (destroys / replaces / no-op)
         working-directory: examples/terragrunt
@@ -71,5 +72,5 @@ jobs:
           eval "$(mise activate bash)"
           ./demo-changes.sh > changes.ndjson
           # attribute fidelity + fold-noop via the example config
-          gruntcmt --scope demo-changes --config .gruntcmt.yaml --commit "$GITHUB_SHA" --out gh < changes.ndjson
-          gruntcmt --scope demo-changes --config .gruntcmt.yaml --commit "$GITHUB_SHA" < changes.ndjson >> "$GITHUB_STEP_SUMMARY"
+          "$GRUNTCMT" --scope demo-changes --config .gruntcmt.yaml --commit "$GITHUB_SHA" --out gh < changes.ndjson
+          "$GRUNTCMT" --scope demo-changes --config .gruntcmt.yaml --commit "$GITHUB_SHA" < changes.ndjson >> "$GITHUB_STEP_SUMMARY"
