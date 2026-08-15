@@ -134,35 +134,71 @@ func (rs Ruleset) DedicatedScopes() []string {
 }
 
 func (rs Ruleset) Title(scope string, dedicated bool) string {
-	title := "Terragrunt plan"
+	if !dedicated {
+		// Non-dedicated: last non-dedicated rule with title, else default
+		title := "Terragrunt plan"
+		for _, r := range rs.Rules {
+			if r.Title != "" && !r.DedicatedComment {
+				title = r.Title
+			}
+		}
+		return title
+	}
+
+	// Dedicated: try dedicated rule with matching scope first
+	dedicatedTitle := ""
+	nonDedicatedTitle := ""
 	for _, r := range rs.Rules {
 		if r.Title == "" {
 			continue
 		}
-		if dedicated {
-			if r.DedicatedComment && r.Scope == scope {
-				title = r.Title
-			}
+		if r.DedicatedComment && r.Scope == scope {
+			dedicatedTitle = r.Title
 		} else if !r.DedicatedComment {
-			title = r.Title
+			nonDedicatedTitle = r.Title
 		}
 	}
-	return title
+
+	if dedicatedTitle != "" {
+		return dedicatedTitle
+	}
+	if nonDedicatedTitle != "" {
+		return nonDedicatedTitle
+	}
+	return "Terragrunt plan"
 }
 
 func (rs Ruleset) GroupBy(scope string, dedicated bool) int {
-	gb := 1
+	if !dedicated {
+		// Non-dedicated: last non-dedicated rule with group-by, else default
+		gb := 1
+		for _, r := range rs.Rules {
+			if r.GroupBy != nil && !r.DedicatedComment {
+				gb = *r.GroupBy
+			}
+		}
+		return gb
+	}
+
+	// Dedicated: try dedicated rule with matching scope first
+	var dedicatedGB *int
+	var nonDedicatedGB *int
 	for _, r := range rs.Rules {
 		if r.GroupBy == nil {
 			continue
 		}
-		if dedicated {
-			if r.DedicatedComment && r.Scope == scope {
-				gb = *r.GroupBy
-			}
+		if r.DedicatedComment && r.Scope == scope {
+			dedicatedGB = r.GroupBy
 		} else if !r.DedicatedComment {
-			gb = *r.GroupBy
+			nonDedicatedGB = r.GroupBy
 		}
 	}
-	return gb
+
+	if dedicatedGB != nil {
+		return *dedicatedGB
+	}
+	if nonDedicatedGB != nil {
+		return *nonDedicatedGB
+	}
+	return 1
 }

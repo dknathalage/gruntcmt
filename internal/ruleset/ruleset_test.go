@@ -80,3 +80,55 @@ func TestParseRejectsBadDetail(t *testing.T) {
 		t.Fatal("expected error for invalid detail")
 	}
 }
+
+func TestDedicatedFallbackToNonDedicated(t *testing.T) {
+	// Ruleset with non-dedicated rule setting title and group-by,
+	// and a dedicated rule that sets neither
+	const sampleFallback = `
+rules:
+  - path: "**"
+    title: "main title"
+    group-by: 2
+  - path: "**/security/**"
+    dedicated-comment: true
+    scope: security
+    delete: attribute
+`
+	rs, err := Parse([]byte(sampleFallback))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// When the dedicated scope rule doesn't set title/group-by,
+	// should fall back to the non-dedicated rule
+	if got := rs.Title("security", true); got != "main title" {
+		t.Errorf("dedicated title should fall back to non-dedicated = %q, want 'main title'", got)
+	}
+	if got := rs.GroupBy("security", true); got != 2 {
+		t.Errorf("dedicated group-by should fall back to non-dedicated = %d, want 2", got)
+	}
+
+	// Verify that a dedicated rule that DOES set its own value still wins
+	const sampleDedicatedWins = `
+rules:
+  - path: "**"
+    title: "main title"
+    group-by: 2
+  - path: "**/security/**"
+    dedicated-comment: true
+    scope: security
+    title: "security title"
+    group-by: 5
+    delete: attribute
+`
+	rs2, err := Parse([]byte(sampleDedicatedWins))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := rs2.Title("security", true); got != "security title" {
+		t.Errorf("dedicated title should win = %q, want 'security title'", got)
+	}
+	if got := rs2.GroupBy("security", true); got != 5 {
+		t.Errorf("dedicated group-by should win = %d, want 5", got)
+	}
+}
