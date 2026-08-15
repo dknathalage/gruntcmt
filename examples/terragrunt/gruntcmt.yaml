@@ -1,0 +1,15 @@
+rules:
+  - path: "**"
+    title: "gruntcmt scenarios"
+    group-by: 1
+    create: summary
+    update: resource
+    delete: attribute
+    replace: attribute
+    noop: summary
+  - path: "**/06-security"
+    dedicated-comment: true
+    scope: security
+    title: "Security plan"
+    create: attribute
+    delete: attribute

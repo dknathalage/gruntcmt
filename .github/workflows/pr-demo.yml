@@ -1,11 +1,12 @@
 # Runs on PRs to this repo. Builds gruntcmt from the PR, plans the example
 # terragrunt project for real (OpenTofu, no cloud), and uses `--out gh` to post
-# the results as PR comments — exercising every discussed scenario:
-#   * scope=demo-create  : first plan, all creates (green), resource fidelity
-#   * scope=demo-changes : apply + mutate -> destroys/replacements/no-op (red),
-#                          attribute fidelity with per-path overrides + fold-noop
-# Both scopes post their own comment (updated in place on re-runs); the full
-# attribute breakdown also goes to the Actions job summary.
+# the results as PR comments — exercising every numbered scenario:
+#   01-create  : create (summary fidelity)
+#   02-update  : in-place update (resource fidelity)
+#   03-replace : forces-replacement (attribute fidelity)
+#   04-destroy : destroy (attribute fidelity)
+#   05-noop    : no change (folded)
+#   06-security: create shown in a dedicated security comment (attribute fidelity)
 #
 # Note: for pull requests from forks the token is read-only, so the comment steps
 # will no-op there. Same-repo PRs (the intended demo) get pull-requests: write.
@@ -53,24 +54,12 @@ jobs:
         working-directory: examples/terragrunt
         run: mise install
 
-      - name: Scenario A — first plan (all creates)
+      - name: Run numbered scenarios and post PR comment
         working-directory: examples/terragrunt
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           eval "$(mise activate bash)"
-          ./plan-to-ndjson.sh > plans.ndjson
-          # PR comment (resource fidelity) + job summary (attribute fidelity)
-          "$GRUNTCMT" --scope demo-create --detail resource --commit "$GITHUB_SHA" --out gh < plans.ndjson
-          "$GRUNTCMT" --scope demo-create --detail attribute --commit "$GITHUB_SHA" < plans.ndjson >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Scenario B — apply + mutate (destroys / replaces / no-op)
-        working-directory: examples/terragrunt
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          eval "$(mise activate bash)"
-          ./demo-changes.sh > changes.ndjson
-          # attribute fidelity + fold-noop via the example config
-          "$GRUNTCMT" --scope demo-changes --config .gruntcmt.yaml --commit "$GITHUB_SHA" --out gh < changes.ndjson
-          "$GRUNTCMT" --scope demo-changes --config .gruntcmt.yaml --commit "$GITHUB_SHA" < changes.ndjson >> "$GITHUB_STEP_SUMMARY"
+          ./plan-scenarios.sh > "$GITHUB_WORKSPACE/s.ndjson"
+          "$GRUNTCMT" --scope scenarios --ruleset examples/terragrunt/gruntcmt.yaml --commit "$GITHUB_SHA" --out gh < "$GITHUB_WORKSPACE/s.ndjson"
+          "$GRUNTCMT" --scope scenarios --ruleset examples/terragrunt/gruntcmt.yaml --commit "$GITHUB_SHA" < "$GITHUB_WORKSPACE/s.ndjson" >> "$GITHUB_STEP_SUMMARY"
