@@ -114,9 +114,13 @@ func Analyze(units []plan.Unit, loadErrs []plan.LoadError, rs ruleset.Ruleset, m
 		buckets[s] = &bucket{scope: s, dedicated: true}
 	}
 	for _, u := range units {
-		for i := range u.Changes {
-			u.Changes[i].Detail = rs.Detail(u.Name, u.Changes[i].Action)
+		// Defensive copy: make a fresh Changes slice so caller's backing array is never mutated
+		changes := make([]plan.ResourceChange, len(u.Changes))
+		copy(changes, u.Changes)
+		for i := range changes {
+			changes[i].Detail = rs.Detail(u.Name, changes[i].Action)
 		}
+		u.Changes = changes
 		scope, dedicated := rs.Assign(u.Name)
 		key := mainScope
 		if dedicated {

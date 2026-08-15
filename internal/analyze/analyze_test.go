@@ -43,6 +43,34 @@ rules:
 	if reports[1].Scope != "security" {
 		t.Errorf("dedicated scope = %q", reports[1].Scope)
 	}
+
+	// Assert unit placement: main report contains networking, not security
+	mainUnitNames := make(map[string]bool)
+	for _, g := range reports[0].Groups {
+		for _, u := range g.Units {
+			mainUnitNames[u.Name] = true
+		}
+	}
+	if !mainUnitNames["prod/networking"] {
+		t.Errorf("main report missing prod/networking")
+	}
+	if mainUnitNames["prod/security/iam"] {
+		t.Errorf("main report should not contain prod/security/iam")
+	}
+
+	// Assert dedicated report contains exactly security unit
+	dedicatedUnitNames := make(map[string]bool)
+	for _, g := range reports[1].Groups {
+		for _, u := range g.Units {
+			dedicatedUnitNames[u.Name] = true
+		}
+	}
+	if !dedicatedUnitNames["prod/security/iam"] {
+		t.Errorf("security report missing prod/security/iam")
+	}
+	if len(dedicatedUnitNames) != 1 {
+		t.Errorf("security report has %d units, want 1", len(dedicatedUnitNames))
+	}
 }
 
 func TestAnalyzeStampsPerChangeDetail(t *testing.T) {
@@ -57,6 +85,28 @@ rules:
 	got := reports[0].Groups[0].Units[0].Changes
 	if got[0].Detail != plan.FidelitySummary || got[1].Detail != plan.FidelityAttribute {
 		t.Fatalf("details = %v,%v", got[0].Detail, got[1].Detail)
+	}
+}
+
+func TestAnalyzeDoesNotMutateCallerInput(t *testing.T) {
+	rs, _ := ruleset.Parse([]byte(`
+rules:
+  - path: "**"
+    create: summary
+    delete: attribute
+`))
+	u := unit("prod/db", plan.ActionCreate, plan.ActionDelete)
+	units := []plan.Unit{u}
+	// Before Analyze, the caller's Changes should have zero Detail (default uninitialized value)
+	originalDetail0 := units[0].Changes[0].Detail
+	originalDetail1 := units[0].Changes[1].Detail
+	_ = Analyze(units, nil, rs, "infra")
+	// After Analyze, the caller's units slice should still have unchanged Detail values
+	if units[0].Changes[0].Detail != originalDetail0 {
+		t.Errorf("after Analyze, units[0].Changes[0].Detail changed from %v to %v (caller input must not be mutated)", originalDetail0, units[0].Changes[0].Detail)
+	}
+	if units[0].Changes[1].Detail != originalDetail1 {
+		t.Errorf("after Analyze, units[0].Changes[1].Detail changed from %v to %v (caller input must not be mutated)", originalDetail1, units[0].Changes[1].Detail)
 	}
 }
 
