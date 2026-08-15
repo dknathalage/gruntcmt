@@ -1,5 +1,5 @@
 <!-- gruntcmt:scope=infra -->
-### 🔴 Terragrunt plan — `infra` · 1 units · 1 destroy · 1 add · 0 change
+### 🔴 Terragrunt plan — `infra` · 1 unit · 1 destroy · 1 add · 0 change
 
 | Group | Units | Add | Change | Destroy | |
 |---|---|---|---|---|---|
@@ -7,7 +7,7 @@
 
 ⚠️ **1 destructive change** — review carefully.
 
-<details><summary><code>production</code> — 1 units</summary>
+<details><summary><code>production</code> — 1 unit</summary>
 
 <details><summary><code>production/db</code></summary>
 

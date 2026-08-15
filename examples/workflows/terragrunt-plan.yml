@@ -34,14 +34,12 @@ jobs:
         working-directory: examples/terragrunt
         run: |
           eval "$(mise activate bash)"
-          ./plan-to-ndjson.sh > "$GITHUB_WORKSPACE/plans.ndjson"
+          ./plan-scenarios.sh > "$GITHUB_WORKSPACE/plans.ndjson"
 
-      # Summarize: lean PR comment (resource) + full job summary (attribute).
+      # Summarize: fidelity, grouping, and dedicated comments come from the ruleset.
       - uses: dknathalage/gruntcmt@v1
         with:
           ndjson: plans.ndjson
           scope: infra
-          config: examples/terragrunt/.gruntcmt.yaml
-          # detail: resource          # PR comment fidelity (default)
-          # summary-detail: attribute # job summary fidelity (default)
+          ruleset: examples/terragrunt/gruntcmt.yaml
           # gruntcmt-version: v0.2.0   # pin the tool; default is latest

@@ -1,11 +1,11 @@
 <!-- gruntcmt:scope=extras -->
-### 🟡 Extras plan — `extras` · 1 units · 0 destroy · 1 add · 1 change
+### 🟡 Extras plan — `extras` · 1 unit · 0 destroy · 1 add · 1 change
 
 | Group | Units | Add | Change | Destroy | |
 |---|---|---|---|---|---|
 | `(all)` | 1 | 1 | 1 | 0 | ✅ |
 
-<details><summary><code>(all)</code> — 1 units</summary>
+<details><summary><code>(all)</code> — 1 unit</summary>
 
 <details><summary><code>db</code></summary>
 
@@ -19,7 +19,7 @@
 
 </details>
 
-<details><summary>⚠️ 1 units failed to parse</summary>
+<details><summary>⚠️ 1 unit failed to parse</summary>
 
 - `broken/unit`: failed to parse plan JSON
 

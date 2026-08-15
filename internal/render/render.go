@@ -84,8 +84,8 @@ func Render(r analyze.Report) string {
 		totalUnits += len(g.Units)
 	}
 
-	fmt.Fprintf(&b, "### %s %s — `%s` · %d units · %d destroy · %d add · %d change\n\n",
-		headEmoji(r), title, r.Scope, totalUnits, r.Totals.Destroy, r.Totals.Add, r.Totals.Change)
+	fmt.Fprintf(&b, "### %s %s — `%s` · %d %s · %d destroy · %d add · %d change\n\n",
+		headEmoji(r), title, r.Scope, totalUnits, pluralUnits(totalUnits), r.Totals.Destroy, r.Totals.Add, r.Totals.Change)
 
 	// Summary table with trailing status column.
 	b.WriteString("| Group | Units | Add | Change | Destroy | |\n|---|---|---|---|---|---|\n")
@@ -108,7 +108,7 @@ func Render(r analyze.Report) string {
 	}
 
 	if len(r.LoadErrors) > 0 {
-		fmt.Fprintf(&b, "<details><summary>⚠️ %d units failed to parse</summary>\n\n", len(r.LoadErrors))
+		fmt.Fprintf(&b, "<details><summary>⚠️ %d %s failed to parse</summary>\n\n", len(r.LoadErrors), pluralUnits(len(r.LoadErrors)))
 		for _, le := range r.LoadErrors {
 			fmt.Fprintf(&b, "- `%s`: %s\n", le.Name, le.Message)
 		}
@@ -161,6 +161,14 @@ func unitBody(u plan.Unit) string {
 	return b.String()
 }
 
+// pluralUnits returns "unit" for a count of 1 and "units" otherwise.
+func pluralUnits(n int) string {
+	if n == 1 {
+		return "unit"
+	}
+	return "units"
+}
+
 // groupLabel is the display name for a group key; the empty key (group-by 0, a
 // single flat group) renders as "(all)" in both the table and the group header.
 func groupLabel(key string) string {
@@ -183,7 +191,7 @@ func renderGroup(b *strings.Builder, g analyze.Group) {
 		return
 	}
 
-	fmt.Fprintf(b, "<details><summary><code>%s</code> — %d units</summary>\n\n", groupLabel(g.Key), len(g.Units))
+	fmt.Fprintf(b, "<details><summary><code>%s</code> — %d %s</summary>\n\n", groupLabel(g.Key), len(g.Units), pluralUnits(len(g.Units)))
 	for _, body := range bodies {
 		b.WriteString(body)
 	}

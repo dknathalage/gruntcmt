@@ -12,20 +12,8 @@ inputs:
   scope:
     description: "Scope label and marker key. One PR comment per scope, updated in place across re-runs."
     required: true
-  detail:
-    description: "Fidelity for the PR comment: summary | resource | attribute."
-    required: false
-    default: "resource"
-  summary-detail:
-    description: "Fidelity for the Actions job summary."
-    required: false
-    default: "attribute"
-  group-by:
-    description: "Leading path segments to group units by."
-    required: false
-    default: "1"
-  config:
-    description: "Optional path to a .gruntcmt.yaml config file."
+  ruleset:
+    description: "Optional path to a gruntcmt.yaml ruleset file (controls fidelity, grouping, titles, dedicated comments)."
     required: false
     default: ""
   commit:
@@ -69,30 +57,23 @@ runs:
     - name: Job summary
       if: ${{ inputs.job-summary == 'true' }}
       shell: bash
+      env:
+        # Only used when the ruleset has a `base:` fetch (GitHub Contents API).
+        GITHUB_TOKEN: ${{ inputs.github-token }}
       run: |
-        args=(--scope "${{ inputs.scope }}" --group-by "${{ inputs.group-by }}" \
-              --detail "${{ inputs.summary-detail }}" --commit "${{ inputs.commit }}")
-        [ -n "${{ inputs.config }}" ] && args+=(--config "${{ inputs.config }}")
+        args=(--scope "${{ inputs.scope }}" --commit "${{ inputs.commit }}")
+        [ -n "${{ inputs.ruleset }}" ] && args+=(--ruleset "${{ inputs.ruleset }}")
         gruntcmt "${args[@]}" < "${{ inputs.ndjson }}" >> "$GITHUB_STEP_SUMMARY"
 
     - name: PR comment (create or update in place)
       if: ${{ inputs.post-comment == 'true' && github.event_name == 'pull_request' }}
       shell: bash
       env:
-        GH_TOKEN: ${{ inputs.github-token }}
+        # gruntcmt --out gh posts/updates the comment itself via the REST API.
+        # Repo comes from $GITHUB_REPOSITORY and the PR number is auto-detected
+        # from $GITHUB_REF (refs/pull/<n>/merge) — no gh CLI, no extra step.
+        GITHUB_TOKEN: ${{ inputs.github-token }}
       run: |
-        args=(--scope "${{ inputs.scope }}" --group-by "${{ inputs.group-by }}" \
-              --detail "${{ inputs.detail }}" --commit "${{ inputs.commit }}")
-        [ -n "${{ inputs.config }}" ] && args+=(--config "${{ inputs.config }}")
-        gruntcmt "${args[@]}" < "${{ inputs.ndjson }}" > gruntcmt-comment.md
-
-        MARKER="<!-- gruntcmt:scope=${{ inputs.scope }} -->"
-        PR="${{ github.event.pull_request.number }}"
-        ID=$(gh api "repos/${{ github.repository }}/issues/${PR}/comments" --paginate \
-              --jq ".[] | select(.body | contains(\"$MARKER\")) | .id" | head -n1)
-        if [ -n "$ID" ]; then
-          gh api -X PATCH "repos/${{ github.repository }}/issues/comments/$ID" \
-            -f body="$(cat gruntcmt-comment.md)"
-        else
-          gh pr comment "$PR" --body-file gruntcmt-comment.md
-        fi
+        args=(--scope "${{ inputs.scope }}" --commit "${{ inputs.commit }}" --out gh)
+        [ -n "${{ inputs.ruleset }}" ] && args+=(--ruleset "${{ inputs.ruleset }}")
+        gruntcmt "${args[@]}" < "${{ inputs.ndjson }}"
