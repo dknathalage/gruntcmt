@@ -46,6 +46,9 @@ func Parse(data []byte) (Ruleset, error) {
 		return rs, err
 	}
 	for i, r := range rs.Rules {
+		if r.DedicatedComment && r.Scope == "" {
+			return rs, fmt.Errorf("rule %d (%s): dedicated-comment requires a non-empty scope", i, r.Path)
+		}
 		for _, v := range []string{r.Create, r.Update, r.Delete, r.Replace, r.Noop} {
 			if v != "" {
 				if _, err := ParseFidelity(v); err != nil {

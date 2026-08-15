@@ -45,6 +45,9 @@ func renderVal(raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""
 	}
+	if string(raw) == "null" {
+		return "(null)"
+	}
 	var s string
 	if json.Unmarshal(raw, &s) == nil {
 		return s
@@ -91,7 +94,11 @@ func diffAttrs(ch tfChange) ([]AttributeChange, int) {
 		bs, as := renderVal(b), renderVal(a)
 		switch {
 		case isUnknown:
-			attrs = append(attrs, AttributeChange{Path: k, Before: bs, After: "", Kind: AttrUpdate, Unknown: true, Sensitive: sens[k], ForcesNew: forces[k]})
+			kind := AttrUpdate
+			if !hasB {
+				kind = AttrAdd
+			}
+			attrs = append(attrs, AttributeChange{Path: k, Before: bs, After: "", Kind: kind, Unknown: true, Sensitive: sens[k], ForcesNew: forces[k]})
 		case hasB && !hasA:
 			attrs = append(attrs, AttributeChange{Path: k, Before: bs, Kind: AttrRemove, Sensitive: sens[k], ForcesNew: forces[k]})
 		case !hasB && hasA:

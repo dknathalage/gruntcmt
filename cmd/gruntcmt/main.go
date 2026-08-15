@@ -18,6 +18,7 @@ import (
 	"github.com/dknathalage/gruntcmt/internal/input"
 	"github.com/dknathalage/gruntcmt/internal/render"
 	"github.com/dknathalage/gruntcmt/internal/ruleset"
+	"gopkg.in/yaml.v3"
 )
 
 // version is overridable at build time via -ldflags "-X main.version=...".
@@ -96,7 +97,12 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 
 	if *printRuleset {
-		fmt.Fprintf(stderr, "%+v\n", rs)
+		out, err := yaml.Marshal(rs)
+		if err != nil {
+			fmt.Fprintln(stderr, "ruleset: marshal:", err)
+			return 1
+		}
+		stderr.Write(out) //nolint:errcheck
 		return 0
 	}
 

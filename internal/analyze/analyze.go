@@ -110,6 +110,10 @@ func Analyze(units []plan.Unit, loadErrs []plan.LoadError, rs ruleset.Ruleset, m
 	order := []string{mainScope}
 	buckets := map[string]*bucket{mainScope: {scope: mainScope, dedicated: false}}
 	for _, s := range rs.DedicatedScopes() {
+		if _, exists := buckets[s]; exists {
+			// Skip: scope already registered (equals mainScope or duplicate dedicated scope).
+			continue
+		}
 		order = append(order, s)
 		buckets[s] = &bucket{scope: s, dedicated: true}
 	}

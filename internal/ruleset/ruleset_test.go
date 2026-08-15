@@ -81,6 +81,14 @@ func TestParseRejectsBadDetail(t *testing.T) {
 	}
 }
 
+func TestParseRejectsDedicatedWithoutScope(t *testing.T) {
+	yaml := "rules:\n  - path: \"**\"\n    dedicated-comment: true\n"
+	_, err := Parse([]byte(yaml))
+	if err == nil {
+		t.Fatal("expected error for dedicated-comment without scope, got nil")
+	}
+}
+
 func TestDedicatedFallbackToNonDedicated(t *testing.T) {
 	// Ruleset with non-dedicated rule setting title and group-by,
 	// and a dedicated rule that sets neither

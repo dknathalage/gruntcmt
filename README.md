@@ -110,6 +110,8 @@ When a ruleset uses `dedicated-comment: true` rules (see below), `--out gh` post
 each report as its own comment, each with its own marker. `--out stdout` concatenates
 them separated by blank lines.
 
+> **Note:** with multiple comments, `--out gh` posts them sequentially and returns non-zero on the first failure, so a mid-run failure can leave earlier comments already posted/updated (not atomic).
+
 ## Ruleset (`gruntcmt.yaml`)
 
 The ruleset is an optional YAML file — `gruntcmt.yaml` (non-hidden) in the working

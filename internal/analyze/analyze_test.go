@@ -110,6 +110,38 @@ rules:
 	}
 }
 
+func TestAnalyzeDedupesScopeCollision(t *testing.T) {
+	// A dedicated rule whose scope equals the mainScope passed to Analyze.
+	// Should produce exactly ONE report with that scope, not two.
+	rs, _ := ruleset.Parse([]byte(`
+rules:
+  - path: "**"
+    group-by: 1
+  - path: "**/infra/**"
+    dedicated-comment: true
+    scope: infra
+`))
+	units := []plan.Unit{
+		unit("infra/vpc", plan.ActionCreate),
+		unit("infra/subnet", plan.ActionUpdate),
+	}
+	reports := Analyze(units, nil, rs, "infra")
+	if len(reports) != 1 {
+		t.Fatalf("reports = %d, want 1 (no duplicate for colliding scope)", len(reports))
+	}
+	if reports[0].Scope != "infra" {
+		t.Errorf("scope = %q, want infra", reports[0].Scope)
+	}
+	// Both units should be in the single report.
+	var total int
+	for _, g := range reports[0].Groups {
+		total += len(g.Units)
+	}
+	if total != 2 {
+		t.Errorf("total units in report = %d, want 2", total)
+	}
+}
+
 // ---- Updated pre-existing tests (old Analyze(config.Settings) → new signature) ----
 
 func TestGroupByDepth(t *testing.T) {
