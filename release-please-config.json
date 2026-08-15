@@ -4,6 +4,9 @@
     ".": {
       "release-type": "go",
       "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        "cmd/gruntcmt/main.go"
+      ],
       "include-component-in-tag": false,
       "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": false,

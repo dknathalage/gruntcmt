@@ -21,10 +21,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// version is overridable at build time via -ldflags "-X main.version=...".
-// When unset ("dev"), resolveVersion falls back to the module version
-// embedded by `go install`/`go build` so releases self-report their tag.
-var version = "dev"
+// version is bumped by release-please on each release (see the annotation below)
+// and can also be overridden at build time via -ldflags "-X main.version=...".
+// For older tags where it is still "dev", resolveVersion falls back to the module
+// version embedded by `go install`/`go build`.
+var version = "0.4.0" // x-release-please-version
 
 func resolveVersion() string {
 	if version != "dev" {
