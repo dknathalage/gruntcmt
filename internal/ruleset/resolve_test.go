@@ -49,3 +49,40 @@ func TestResolveDetectsCycle(t *testing.T) {
 		t.Fatal("expected cycle error")
 	}
 }
+
+func TestResolveDepthLimit(t *testing.T) {
+	// httptest server that increments a counter and returns a new distinct base ref each time
+	counter := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		counter++
+		nextRef := fmt.Sprintf("org/shared//b%d.yaml@v1", counter)
+		fmt.Fprintf(w, "base: %s\nrules: []\n", nextRef)
+	}))
+	defer srv.Close()
+
+	local, _ := Parse([]byte("base: org/shared//b0.yaml@v1\nrules: []\n"))
+	f := &Fetcher{HTTP: http.DefaultClient, APIURL: strings.TrimRight(srv.URL, "/")}
+	_, err := Resolve(context.Background(), local, f)
+	if err == nil {
+		t.Fatal("expected depth limit error")
+	}
+	if !strings.Contains(err.Error(), "too deep") {
+		t.Errorf("error message should mention depth; got: %v", err)
+	}
+}
+
+func TestDefaultTokenEnvPrecedence(t *testing.T) {
+	// Test GITHUB_TOKEN takes precedence
+	t.Setenv("GITHUB_TOKEN", "aaa")
+	t.Setenv("GH_TOKEN", "")
+	if got := DefaultToken(); got != "aaa" {
+		t.Errorf("DefaultToken() = %q, want %q (GITHUB_TOKEN)", got, "aaa")
+	}
+
+	// Test GH_TOKEN when GITHUB_TOKEN is empty
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("GH_TOKEN", "bbb")
+	if got := DefaultToken(); got != "bbb" {
+		t.Errorf("DefaultToken() = %q, want %q (GH_TOKEN)", got, "bbb")
+	}
+}

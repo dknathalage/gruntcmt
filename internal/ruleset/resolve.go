@@ -16,7 +16,7 @@ func Resolve(ctx context.Context, rs Ruleset, f *Fetcher) (Ruleset, error) {
 
 func resolve(ctx context.Context, rs Ruleset, f *Fetcher, seen map[string]bool, depth int) (Ruleset, error) {
 	if rs.Base == "" {
-		return Ruleset{Rules: rs.Rules}, nil
+		return Ruleset{Rules: append([]Rule(nil), rs.Rules...)}, nil
 	}
 	if depth >= maxBaseDepth {
 		return Ruleset{}, fmt.Errorf("base chain too deep (>%d)", maxBaseDepth)
