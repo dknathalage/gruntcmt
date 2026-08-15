@@ -66,6 +66,7 @@ type ResourceChange struct {
 	Action     Action
 	Attributes []AttributeChange
 	Unchanged  int
+	Detail     Fidelity // per-change render fidelity, resolved by analyze
 }
 
 type OutputChange struct {
@@ -174,3 +175,6 @@ func countChanges(changes []ResourceChange) Counts {
 	}
 	return c
 }
+
+// Count returns the change counts for a slice of resource changes.
+func Count(changes []ResourceChange) Counts { return countChanges(changes) }
