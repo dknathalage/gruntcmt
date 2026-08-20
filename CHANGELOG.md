@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.1](https://github.com/dknathalage/gruntcmt/compare/v0.5.0...v0.5.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* remove docs ([269b3db](https://github.com/dknathalage/gruntcmt/commit/269b3db71b5fe86ac7c9898fc7e0ddfc30cf56dc))
+* remove docs ([ffbceec](https://github.com/dknathalage/gruntcmt/commit/ffbceec924f69cc51c1e69bdff142a7c7010fe90))
+
 ## [0.5.0](https://github.com/dknathalage/gruntcmt/compare/v0.4.2...v0.5.0) (2026-08-20)
 
 
