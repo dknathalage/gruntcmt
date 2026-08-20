@@ -16,7 +16,7 @@ live/
   05-noop/                        # no change
   06-security/                    # create — rendered in a dedicated security comment
 gruntcmt.yaml                     # ruleset: group-by 1, per-type fidelity + security rule
-plan-scenarios.sh                 # apply baseline + plan changed -> gruntcmt NDJSON
+plan-scenarios.sh                 # apply baseline + plan changed into ./out -> gruntcmt
 ```
 
 ## Prerequisites
@@ -31,16 +31,18 @@ mise install          # OpenTofu 1.12.3 + terragrunt 1.0.8
 ## Plan and summarize all scenarios
 
 ```bash
-./plan-scenarios.sh 2>/dev/null | gruntcmt --scope scenarios --ruleset gruntcmt.yaml
+./plan-scenarios.sh
 ```
 
 `plan-scenarios.sh` applies a baseline state for each unit, then plans at
-`PHASE=changed` so each unit produces its designed change type. It emits one
-wrapped-NDJSON line per unit (`{"name":"01-create","plan":{…}}`).
+`PHASE=changed` so each unit produces its designed change type. It runs
+`terragrunt run --all plan --json-out-dir out`, which writes one
+`out/<unit>/tfplan.json` per unit, then calls `gruntcmt out` — which walks the
+tree, naming each unit by its path.
 
 Expected output — two documents:
 
-1. **Main comment** (`scope=scenarios`) — a table row per numbered scenario:
+1. **Main comment** (`scope=out`) — a table row per numbered scenario:
    - `01-create`: 1 add (summary, not expanded)
    - `02-update`: resource-level update line
    - `03-replace`: attribute diff with `# forces replacement`
@@ -77,5 +79,10 @@ dedicated comment with its own scope and attribute fidelity.
 
 ## In CI
 
-See `.github/workflows/pr-demo.yml` — it runs `./plan-scenarios.sh` and posts
-both comments via `--out gh`, plus writes the job summary.
+Run the same two steps in a workflow, dropping `--out /dev/stdout` from the final
+command so gruntcmt comments the pull request instead:
+
+```bash
+terragrunt run --all plan --json-out-dir out
+gruntcmt --config gruntcmt.yaml out       # repo/PR/commit/token auto-detected
+```

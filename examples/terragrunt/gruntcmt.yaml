@@ -1,10 +1,15 @@
-# The shared default `**` rule lives in base.yaml, fetched from this repo and
-# merged UNDER the local rules below (local wins under last-match-wins). Pinned to
-# the base file's commit SHA so it resolves the same forever.
-base: dknathalage/gruntcmt//examples/terragrunt/base.yaml@9bdfaa2e61b38e651f316ea7c0c6aa1a8f4ecffa
-
+# Single self-contained ruleset for the scenario units. No `base:` — one file.
 rules:
-  # Local override: pull the security unit into its own comment, at full detail.
+  # Default rule for every unit.
+  - path: "**"
+    title: "gruntcmt scenarios"
+    group-by: 1
+    create: summary      # creates: counted in the table, not listed
+    update: resource     # updates: address + action line
+    delete: attribute    # deletes: full before -> after diff
+    replace: attribute   # replacements: full diff (forces-replacement shown)
+    noop: summary
+  # Pull the security unit into its own comment, at full detail.
   - path: "**/06-security"
     dedicated-comment: true
     scope: security
