@@ -140,3 +140,25 @@ rules:
 		t.Errorf("dedicated group-by should win = %d, want 5", got)
 	}
 }
+
+func TestDefaultRulesetDetail(t *testing.T) {
+	rs := Default()
+	for _, a := range []plan.Action{plan.ActionDelete, plan.ActionReplace, plan.ActionCreate, plan.ActionUpdate} {
+		if d := rs.Detail("any/unit", a); d != plan.FidelityAttribute {
+			t.Errorf("action %v detail = %v want attribute", a, d)
+		}
+	}
+	if d := rs.Detail("any/unit", plan.ActionNoOp); d != plan.FidelitySummary {
+		t.Errorf("noop detail = %v want summary", d)
+	}
+}
+
+func TestDefaultRulesetGrouping(t *testing.T) {
+	rs := Default()
+	if gb := rs.GroupBy("", false); gb != 0 {
+		t.Errorf("group-by = %d want 0", gb)
+	}
+	if title := rs.Title("", false); title != "Terragrunt plan" {
+		t.Errorf("title = %q want Terragrunt plan", title)
+	}
+}

@@ -5,7 +5,8 @@
       "release-type": "go",
       "changelog-path": "CHANGELOG.md",
       "extra-files": [
-        "cmd/gruntcmt/main.go"
+        "cmd/gruntcmt/main.go",
+        "README.md"
       ],
       "include-component-in-tag": false,
       "bump-minor-pre-major": true,

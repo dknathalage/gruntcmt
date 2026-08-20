@@ -2,19 +2,17 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"regexp"
 	"runtime/debug"
-	"strconv"
 	"strings"
 
 	"github.com/dknathalage/gruntcmt/internal/analyze"
 	"github.com/dknathalage/gruntcmt/internal/gh"
+	"github.com/dknathalage/gruntcmt/internal/ghctx"
 	"github.com/dknathalage/gruntcmt/internal/input"
 	"github.com/dknathalage/gruntcmt/internal/render"
 	"github.com/dknathalage/gruntcmt/internal/ruleset"
@@ -23,8 +21,6 @@ import (
 
 // version is bumped by release-please on each release (see the annotation below)
 // and can also be overridden at build time via -ldflags "-X main.version=...".
-// For older tags where it is still "dev", resolveVersion falls back to the module
-// version embedded by `go install`/`go build`.
 var version = "0.4.2" // x-release-please-version
 
 func resolveVersion() string {
@@ -46,20 +42,14 @@ func apiBaseURL() string {
 	return "https://api.github.com"
 }
 
-func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+func run(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("gruntcmt", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var (
-		scope        = fs.String("scope", "", "scope label + marker key")
-		name         = fs.String("name", "plan", "unit name for a bare single plan")
-		inputMode    = fs.String("input", "", "auto|wrapped|plan")
-		commit       = fs.String("commit", "", "commit SHA to stamp in footer")
-		rulesetFlag  = fs.String("ruleset", "", "path to ruleset YAML file")
-		printRuleset = fs.Bool("print-ruleset", false, "print resolved ruleset to stderr and exit")
-		out          = fs.String("out", "stdout", "output destination: stdout|gh")
-		repo         = fs.String("repo", "", "owner/name for --out gh (default $GITHUB_REPOSITORY)")
-		prNum        = fs.Int("pr", 0, "pull request number for --out gh (default: auto-detect in GitHub Actions)")
-		showVersion  = fs.Bool("version", false, "print version and exit")
+		configFlag  = fs.String("config", "", "path to gruntcmt.yaml (default: ./gruntcmt.yaml, else built-in)")
+		printConfig = fs.Bool("print-config", false, "print resolved config to stderr and exit")
+		out         = fs.String("out", "", "output: <empty>=PR comment | summary | file path")
+		showVersion = fs.Bool("version", false, "print version and exit")
 	)
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -69,118 +59,118 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 0
 	}
 
-	// Load ruleset: from --ruleset, else ./gruntcmt.yaml if it exists, else empty.
-	var rs ruleset.Ruleset
-	path := *rulesetFlag
-	if path == "" {
-		if _, err := os.Stat("gruntcmt.yaml"); err == nil {
-			path = "gruntcmt.yaml"
-		}
+	rs, err := loadConfig(*configFlag)
+	if err != nil {
+		fmt.Fprintln(stderr, "config:", err)
+		return 1
 	}
-	if path != "" {
-		loaded, err := ruleset.Load(path)
+	if *printConfig {
+		b, err := yaml.Marshal(rs)
 		if err != nil {
-			fmt.Fprintln(stderr, "ruleset:", err)
+			fmt.Fprintln(stderr, "config: marshal:", err)
 			return 1
 		}
-		rs = loaded
-	}
-
-	// Resolve base if set.
-	if rs.Base != "" {
-		f := &ruleset.Fetcher{HTTP: http.DefaultClient, APIURL: apiBaseURL(), Token: ruleset.DefaultToken()}
-		merged, err := ruleset.Resolve(context.Background(), rs, f)
-		if err != nil {
-			fmt.Fprintln(stderr, "ruleset:", err)
-			return 1
-		}
-		rs = merged
-	}
-
-	if *printRuleset {
-		out, err := yaml.Marshal(rs)
-		if err != nil {
-			fmt.Fprintln(stderr, "ruleset: marshal:", err)
-			return 1
-		}
-		stderr.Write(out) //nolint:errcheck
+		stderr.Write(b) //nolint:errcheck
 		return 0
 	}
 
-	// Resolve input mode.
-	resolvedInput := *inputMode
-	if resolvedInput == "" {
-		resolvedInput = "auto"
-	}
-
-	mode := input.ModeAuto
-	switch resolvedInput {
-	case "", "auto":
-		mode = input.ModeAuto
-	case "wrapped":
-		mode = input.ModeWrapped
-	case "plan":
-		mode = input.ModePlan
-	default:
-		fmt.Fprintln(stderr, "invalid --input (want auto|wrapped|plan)")
-		return 1
-	}
-
-	units, loadErrs, err := input.Read(stdin, mode, *name)
+	paths := fs.Args()
+	units, loadErrs, err := input.ReadPaths(paths)
 	if err != nil {
 		fmt.Fprintln(stderr, "gruntcmt:", err)
 		return 1
 	}
 
-	reports := analyze.Analyze(units, loadErrs, rs, *scope)
+	scope := ghctx.Scope(paths)
+	reports := analyze.Analyze(units, loadErrs, rs, scope)
+	commit := ghctx.Commit()
 	for i := range reports {
-		reports[i].Commit = *commit
+		reports[i].Commit = commit
 	}
 
 	switch *out {
-	case "", "stdout":
-		for i, rep := range reports {
-			if i > 0 {
-				io.WriteString(stdout, "\n") //nolint:errcheck
-			}
-			io.WriteString(stdout, render.Render(rep)) //nolint:errcheck
+	case "gh", "":
+		return postReports(stderr, reports)
+	case "summary":
+		return writeSummary(stderr, reports)
+	case "-", "/dev/stdout":
+		io.WriteString(stdout, renderAll(reports)) //nolint:errcheck
+		return 0
+	default:
+		if err := os.WriteFile(*out, []byte(renderAll(reports)), 0o644); err != nil {
+			fmt.Fprintln(stderr, "gruntcmt:", err)
+			return 1
 		}
 		return 0
-	case "gh":
-		return postReports(stderr, reports, *repo, *prNum)
-	default:
-		fmt.Fprintln(stderr, "invalid --out (want stdout|gh)")
-		return 1
 	}
 }
 
-// postReports creates or updates PR comments for each report via the GitHub REST API.
-// Token comes from $GITHUB_TOKEN/$GH_TOKEN; repo/pr default to the GitHub Actions
-// environment. On success it prints each comment URL to stderr. Returns 1 on any failure.
-func postReports(stderr io.Writer, reports []analyze.Report, repo string, pr int) int {
-	token := firstEnv("GITHUB_TOKEN", "GH_TOKEN")
+// loadConfig resolves the ruleset: --config path, else ./gruntcmt.yaml, else Default().
+func loadConfig(configPath string) (ruleset.Ruleset, error) {
+	path := configPath
+	if path == "" {
+		if _, err := os.Stat("gruntcmt.yaml"); err == nil {
+			path = "gruntcmt.yaml"
+		}
+	}
+	if path == "" {
+		return ruleset.Default(), nil
+	}
+	return ruleset.Load(path)
+}
+
+// renderAll concatenates report bodies with a blank line between them.
+func renderAll(reports []analyze.Report) string {
+	var b strings.Builder
+	for i, rep := range reports {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(render.Render(rep))
+	}
+	return b.String()
+}
+
+func writeSummary(stderr io.Writer, reports []analyze.Report) int {
+	path := os.Getenv("GITHUB_STEP_SUMMARY")
+	if path == "" {
+		fmt.Fprintln(stderr, "gruntcmt: --out summary needs $GITHUB_STEP_SUMMARY")
+		return 1
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		fmt.Fprintln(stderr, "gruntcmt:", err)
+		return 1
+	}
+	defer f.Close()
+	if _, err := io.WriteString(f, renderAll(reports)); err != nil {
+		fmt.Fprintln(stderr, "gruntcmt:", err)
+		return 1
+	}
+	return 0
+}
+
+// postReports upserts one PR comment per report. repo/pr/token are auto-detected
+// from the environment (CI) or local git/gh.
+func postReports(stderr io.Writer, reports []analyze.Report) int {
+	token := ghctx.Token()
 	if token == "" {
-		fmt.Fprintln(stderr, "gruntcmt: --out gh needs a token in $GITHUB_TOKEN or $GH_TOKEN")
+		fmt.Fprintln(stderr, "gruntcmt: no GitHub token ($GITHUB_TOKEN/$GH_TOKEN or `gh auth login`)")
 		return 1
 	}
-	if repo == "" {
-		repo = os.Getenv("GITHUB_REPOSITORY")
-	}
-	if repo == "" {
-		fmt.Fprintln(stderr, "gruntcmt: --out gh needs --repo or $GITHUB_REPOSITORY (owner/name)")
+	repo, err := ghctx.Repo()
+	if err != nil {
+		fmt.Fprintln(stderr, "gruntcmt: cannot determine repo:", err)
 		return 1
 	}
-	if pr == 0 {
-		pr = detectPR()
-	}
-	if pr == 0 {
-		fmt.Fprintln(stderr, "gruntcmt: --out gh needs --pr or a detectable pull request (GITHUB_REF/GITHUB_EVENT_PATH)")
+	pr, err := ghctx.PR()
+	if err != nil {
+		fmt.Fprintln(stderr, "gruntcmt: cannot determine pull request:", err)
 		return 1
 	}
 	client := &gh.Client{HTTP: http.DefaultClient, APIURL: apiBaseURL(), Token: token}
 	for _, rep := range reports {
-		body := render.Render(rep)
-		url, err := client.UpsertComment(context.Background(), repo, pr, render.Marker(rep.Scope), body)
+		url, err := client.UpsertComment(context.Background(), repo, pr, render.Marker(rep.Scope), render.Render(rep))
 		if err != nil {
 			fmt.Fprintln(stderr, "gruntcmt:", err)
 			return 1
@@ -190,44 +180,6 @@ func postReports(stderr io.Writer, reports []analyze.Report, repo string, pr int
 	return 0
 }
 
-func firstEnv(keys ...string) string {
-	for _, k := range keys {
-		if v := os.Getenv(k); v != "" {
-			return v
-		}
-	}
-	return ""
-}
-
-var pullRefRe = regexp.MustCompile(`^refs/pull/(\d+)/`)
-
-// detectPR resolves the PR number from the GitHub Actions environment: first the
-// GITHUB_REF (refs/pull/<n>/merge), then the event payload at GITHUB_EVENT_PATH.
-func detectPR() int {
-	if m := pullRefRe.FindStringSubmatch(os.Getenv("GITHUB_REF")); m != nil {
-		if n, err := strconv.Atoi(m[1]); err == nil {
-			return n
-		}
-	}
-	if p := os.Getenv("GITHUB_EVENT_PATH"); p != "" {
-		if raw, err := os.ReadFile(p); err == nil {
-			var ev struct {
-				Number      int `json:"number"`
-				PullRequest struct {
-					Number int `json:"number"`
-				} `json:"pull_request"`
-			}
-			if json.Unmarshal(raw, &ev) == nil {
-				if ev.PullRequest.Number != 0 {
-					return ev.PullRequest.Number
-				}
-				return ev.Number
-			}
-		}
-	}
-	return 0
-}
-
 func main() {
-	os.Exit(run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }

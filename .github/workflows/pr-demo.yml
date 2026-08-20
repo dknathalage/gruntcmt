@@ -1,15 +1,7 @@
-# Runs on PRs to this repo. Builds gruntcmt from the PR, plans the example
-# terragrunt project for real (OpenTofu, no cloud), and uses `--out gh` to post
-# the results as PR comments — exercising every numbered scenario:
-#   01-create  : create (summary fidelity)
-#   02-update  : in-place update (resource fidelity)
-#   03-replace : forces-replacement (attribute fidelity)
-#   04-destroy : destroy (attribute fidelity)
-#   05-noop    : no change (folded)
-#   06-security: create shown in a dedicated security comment (attribute fidelity)
-#
-# Note: for pull requests from forks the token is read-only, so the comment steps
-# will no-op there. Same-repo PRs (the intended demo) get pull-requests: write.
+# Demonstrates gruntcmt as a plain CLI in CI: builds it from the PR's own source,
+# plans the example terragrunt units into ./out, then lets gruntcmt comment this PR.
+# repo / PR / commit / token are auto-detected from the Actions environment
+# ($GITHUB_REPOSITORY, $GITHUB_REF, $GITHUB_SHA, $GITHUB_TOKEN) — no flags needed.
 name: pr-demo
 
 on:
@@ -20,63 +12,33 @@ permissions:
   pull-requests: write
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.24"
-      - run: go test ./...
-
-  # Smoke-test the shipped composite action end to end so its flag surface can't
-  # silently drift from the CLI again. Uses the local action (`uses: ./`) against a
-  # tiny fixture; job summary only, no PR comment (no token/side effects needed).
-  action-smoke:
-    needs: test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Fixture NDJSON
-        run: printf '%s\n' '{"name":"a/b","plan":{"format_version":"1.0","resource_changes":[]}}' > fixture.ndjson
-      - uses: ./
-        with:
-          ndjson: fixture.ndjson
-          scope: smoke
-          post-comment: "false"
-          job-summary: "true"
-
-  demo:
-    needs: test
+  plan-comment:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
+          go-version-file: go.mod
 
-      - name: Build gruntcmt from this PR
+      - name: Build gruntcmt from source
         run: |
-          go build -o "$RUNNER_TEMP/gruntcmt" ./cmd/gruntcmt
-          # Reference by absolute path so it can't be shadowed by a mise `gruntcmt`
-          # shim (the repo's own mise.toml declares the go: backend).
-          echo "GRUNTCMT=$RUNNER_TEMP/gruntcmt" >> "$GITHUB_ENV"
+          go build -o "$RUNNER_TEMP/bin/gruntcmt" ./cmd/gruntcmt
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
 
-      # OpenTofu + terragrunt, pinned in examples/terragrunt/mise.toml.
-      - uses: jdx/mise-action@v2
-        with:
-          install: "false"
       - name: Install OpenTofu + terragrunt
+        uses: jdx/mise-action@v2
+        with:
+          install: false
+      - run: mise install
         working-directory: examples/terragrunt
-        run: mise install
 
-      - name: Run numbered scenarios and post PR comment
+      - name: Plan scenarios into ./out
+        working-directory: examples/terragrunt
+        run: ./plan-scenarios.sh
+
+      - name: Comment the PR
         working-directory: examples/terragrunt
         env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          eval "$(mise activate bash)"
-          ./plan-scenarios.sh > "$GITHUB_WORKSPACE/s.ndjson"
-          "$GRUNTCMT" --scope scenarios --ruleset gruntcmt.yaml --commit "$GITHUB_SHA" --out gh < "$GITHUB_WORKSPACE/s.ndjson"
-          "$GRUNTCMT" --scope scenarios --ruleset gruntcmt.yaml --commit "$GITHUB_SHA" < "$GITHUB_WORKSPACE/s.ndjson" >> "$GITHUB_STEP_SUMMARY"
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gruntcmt --config gruntcmt.yaml out
