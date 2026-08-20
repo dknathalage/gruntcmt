@@ -3,18 +3,30 @@ package main
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
+const barePlan = `{"format_version":"1.2","terraform_version":"1.9.5","resource_changes":[{"address":"aws_s3_bucket.b","change":{"actions":["create"]}}]}`
+
+func writePlan(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(barePlan), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRunVersion(t *testing.T) {
 	var out, errBuf bytes.Buffer
-	code := run([]string{"--version"}, strings.NewReader(""), &out, &errBuf)
-	if code != 0 {
-		t.Fatalf("exit code = %d, want 0", code)
+	if code := run([]string{"--version"}, &out, &errBuf); code != 0 {
+		t.Fatalf("code=%d", code)
 	}
 	if !strings.Contains(out.String(), "gruntcmt") {
-		t.Fatalf("stdout = %q, want it to contain %q", out.String(), "gruntcmt")
+		t.Fatalf("stdout=%q", out.String())
 	}
 }
 
@@ -23,7 +35,7 @@ func TestResolveVersionPrefersLdflags(t *testing.T) {
 	defer func() { version = orig }()
 	version = "v9.9.9"
 	if got := resolveVersion(); got != "v9.9.9" {
-		t.Fatalf("resolveVersion() = %q, want v9.9.9", got)
+		t.Fatalf("got %q", got)
 	}
 }
 
@@ -31,101 +43,93 @@ func TestResolveVersionDevFallbackNonEmpty(t *testing.T) {
 	orig := version
 	defer func() { version = orig }()
 	version = "dev"
-	// Under `go test`, build info Main.Version is typically "" or "(devel)",
-	// so this exercises the fallback path and must never return empty.
 	if got := resolveVersion(); got == "" {
 		t.Fatal("resolveVersion() returned empty string")
 	}
 }
 
-func TestRunEndToEndBarePlanRuleset(t *testing.T) {
-	const p = `{"format_version":"1.2","terraform_version":"1.9.5","resource_changes":[{"address":"aws_s3_bucket.b","change":{"actions":["create"]}}]}`
-	var out, errBuf bytes.Buffer
-	code := run([]string{"--scope", "net", "--name", "networking/s3"}, strings.NewReader(p), &out, &errBuf)
-	if code != 0 {
-		t.Fatalf("code=%d stderr=%s", code, errBuf.String())
-	}
-	if !strings.HasPrefix(out.String(), "<!-- gruntcmt:scope=net -->") {
-		t.Errorf("missing marker: %q", out.String())
-	}
-}
-
-func TestRunRejectsRemovedDetailFlag(t *testing.T) {
-	const p = `{"format_version":"1.2","terraform_version":"1.9.5","resource_changes":[]}`
-	var out, errBuf bytes.Buffer
-	if code := run([]string{"--scope", "x", "--detail", "attribute"}, strings.NewReader(p), &out, &errBuf); code == 0 {
-		t.Fatal("expected non-zero: --detail was removed")
-	}
-}
-
-func TestRunMultiReportStdout(t *testing.T) {
+func TestRunToFile(t *testing.T) {
 	dir := t.TempDir()
-	rulesetPath := dir + "/gruntcmt.yaml"
-	os.WriteFile(rulesetPath, []byte(`
-rules:
-  - path: "**"
-    delete: resource
-  - path: "**/security/**"
-    dedicated-comment: true
-    scope: security
-    delete: resource
-`), 0o644)
-	in := `{"name":"prod/networking","plan":{"format_version":"1.2","terraform_version":"1.9.5","resource_changes":[{"address":"a","change":{"actions":["create"]}}]}}` + "\n" +
-		`{"name":"prod/security/iam","plan":{"format_version":"1.2","terraform_version":"1.9.5","resource_changes":[{"address":"b","change":{"actions":["delete"]}}]}}` + "\n"
+	writePlan(t, filepath.Join(dir, "prod/networking/tfplan.json"))
+	outFile := filepath.Join(t.TempDir(), "report.md")
 	var out, errBuf bytes.Buffer
-	code := run([]string{"--scope", "infra", "--ruleset", rulesetPath}, strings.NewReader(in), &out, &errBuf)
+	code := run([]string{"--out", outFile, dir}, &out, &errBuf)
 	if code != 0 {
 		t.Fatalf("code=%d stderr=%s", code, errBuf.String())
 	}
-	if !strings.Contains(out.String(), "<!-- gruntcmt:scope=infra -->") ||
-		!strings.Contains(out.String(), "<!-- gruntcmt:scope=security -->") {
-		t.Errorf("expected both main and dedicated markers:\n%s", out.String())
+	body, err := os.ReadFile(outFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "gruntcmt:scope="+filepath.Base(dir)) {
+		t.Errorf("missing scope marker:\n%s", body)
 	}
 }
 
-func TestRunEmptyStdinFails(t *testing.T) {
+func TestRunToStdoutDevice(t *testing.T) {
+	dir := t.TempDir()
+	writePlan(t, filepath.Join(dir, "prod/tfplan.json"))
 	var out, errBuf bytes.Buffer
-	if code := run(nil, strings.NewReader(""), &out, &errBuf); code == 0 {
-		t.Fatal("expected non-zero exit for empty stdin")
+	if code := run([]string{"--out", "/dev/stdout", dir}, &out, &errBuf); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errBuf.String())
+	}
+	if !strings.HasPrefix(out.String(), "<!-- gruntcmt:scope=") {
+		t.Fatalf("stdout=%q", out.String())
 	}
 }
 
-func TestRunInvalidInputModeFails(t *testing.T) {
-	const p = `{"format_version":"1.2","terraform_version":"1.9.5","resource_changes":[{"address":"aws_s3_bucket.b","change":{"actions":["create"]}}]}`
+func TestRunSummary(t *testing.T) {
+	dir := t.TempDir()
+	writePlan(t, filepath.Join(dir, "prod/tfplan.json"))
+	summary := filepath.Join(t.TempDir(), "summary.md")
+	t.Setenv("GITHUB_STEP_SUMMARY", summary)
 	var out, errBuf bytes.Buffer
-	code := run([]string{"--scope", "x", "--name", "a", "--input", "bogus"}, strings.NewReader(p), &out, &errBuf)
-	if code == 0 {
-		t.Fatalf("expected non-zero exit for invalid --input")
+	if code := run([]string{"--out", "summary", dir}, &out, &errBuf); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errBuf.String())
+	}
+	body, err := os.ReadFile(summary)
+	if err != nil || !strings.Contains(string(body), "gruntcmt:scope=") {
+		t.Fatalf("summary body=%q err=%v", body, err)
 	}
 }
 
-func TestRunOutGhWithoutTokenFails(t *testing.T) {
-	t.Setenv("GITHUB_TOKEN", "")
-	t.Setenv("GH_TOKEN", "")
-	const p = `{"format_version":"1.2","terraform_version":"1.9.5","resource_changes":[{"address":"aws_s3_bucket.b","change":{"actions":["create"]}}]}`
+func TestRunSummaryWithoutEnvFails(t *testing.T) {
+	dir := t.TempDir()
+	writePlan(t, filepath.Join(dir, "prod/tfplan.json"))
+	t.Setenv("GITHUB_STEP_SUMMARY", "")
 	var out, errBuf bytes.Buffer
-	code := run([]string{"--scope", "x", "--name", "a", "--out", "gh"}, strings.NewReader(p), &out, &errBuf)
-	if code == 0 {
-		t.Fatalf("expected non-zero exit without token; stderr=%s", errBuf.String())
-	}
-	if out.Len() != 0 {
-		t.Errorf("--out gh should not write markdown to stdout, got %q", out.String())
+	if code := run([]string{"--out", "summary", dir}, &out, &errBuf); code == 0 {
+		t.Fatal("expected failure without GITHUB_STEP_SUMMARY")
 	}
 }
 
-func TestRunInvalidOutFails(t *testing.T) {
-	const p = `{"format_version":"1.2","terraform_version":"1.9.5","resource_changes":[{"address":"aws_s3_bucket.b","change":{"actions":["create"]}}]}`
+func TestRunNoArgsFails(t *testing.T) {
 	var out, errBuf bytes.Buffer
-	if code := run([]string{"--scope", "x", "--name", "a", "--out", "bogus"}, strings.NewReader(p), &out, &errBuf); code == 0 {
-		t.Fatal("expected non-zero exit for invalid --out")
+	if code := run([]string{"--out", "/dev/stdout"}, &out, &errBuf); code == 0 {
+		t.Fatal("expected failure with no plan paths")
 	}
 }
 
-func TestRunOutStdoutDefaultUnchanged(t *testing.T) {
-	const p = `{"format_version":"1.2","terraform_version":"1.9.5","resource_changes":[{"address":"aws_s3_bucket.b","change":{"actions":["create"]}}]}`
+func TestRunRejectsRemovedFlag(t *testing.T) {
+	dir := t.TempDir()
+	writePlan(t, filepath.Join(dir, "prod/tfplan.json"))
 	var out, errBuf bytes.Buffer
-	code := run([]string{"--scope", "x", "--name", "a"}, strings.NewReader(p), &out, &errBuf)
-	if code != 0 || !strings.HasPrefix(out.String(), "<!-- gruntcmt:scope=x -->") {
-		t.Fatalf("default stdout path changed: code=%d out=%q", code, out.String())
+	if code := run([]string{"--scope", "x", "--out", "/dev/stdout", dir}, &out, &errBuf); code == 0 {
+		t.Fatal("expected failure: --scope was removed")
+	}
+}
+
+func TestRunPrintConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "gruntcmt.yaml")
+	if err := os.WriteFile(cfg, []byte("rules:\n  - path: \"**\"\n    delete: attribute\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errBuf bytes.Buffer
+	if code := run([]string{"--config", cfg, "--print-config"}, &out, &errBuf); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errBuf.String())
+	}
+	if !strings.Contains(errBuf.String(), "rules:") {
+		t.Fatalf("expected ruleset yaml on stderr, got %q", errBuf.String())
 	}
 }

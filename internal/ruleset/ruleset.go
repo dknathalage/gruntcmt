@@ -23,7 +23,6 @@ type Rule struct {
 }
 
 type Ruleset struct {
-	Base  string `yaml:"base"`
 	Rules []Rule `yaml:"rules"`
 }
 
