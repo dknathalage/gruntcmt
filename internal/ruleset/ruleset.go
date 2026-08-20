@@ -27,6 +27,22 @@ type Ruleset struct {
 	Rules []Rule `yaml:"rules"`
 }
 
+// Default is the built-in ruleset used when no config file is present:
+// a single flat group with full attribute detail for every real change.
+func Default() Ruleset {
+	zero := 0
+	return Ruleset{Rules: []Rule{{
+		Path:    "**",
+		Title:   "Terragrunt plan",
+		GroupBy: &zero,
+		Create:  "attribute",
+		Update:  "attribute",
+		Delete:  "attribute",
+		Replace: "attribute",
+		Noop:    "summary",
+	}}}
+}
+
 func ParseFidelity(s string) (plan.Fidelity, error) {
 	switch s {
 	case "summary":
