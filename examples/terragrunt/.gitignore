@@ -1,5 +1,7 @@
 # Terragrunt / OpenTofu working artifacts — never committed.
 .terragrunt-cache/
+# gruntcmt plan output dir (terragrunt --out-dir/--json-out-dir target).
+out/
 *.tfplan
 *.tfstate
 *.tfstate.backup
