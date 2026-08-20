@@ -1,5 +1,9 @@
 # gruntcmt
 
+<!-- x-release-please-start-version -->
+Current release: **v0.4.2**
+<!-- x-release-please-end-version -->
+
 `gruntcmt` is a small CLI that turns Terraform plan JSON — produced by terragrunt
 units — into meaningful GitHub-flavored markdown, and by default upserts it as a
 pull-request comment. Point it at a directory of plans and it discovers each unit,
@@ -14,11 +18,13 @@ gruntcmt out
 
 ## Install
 
+<!-- x-release-please-start-version -->
 ```bash
-go install github.com/dknathalage/gruntcmt/cmd/gruntcmt@latest
+go install github.com/dknathalage/gruntcmt/cmd/gruntcmt@v0.4.2
 ```
+<!-- x-release-please-end-version -->
 
-Ensure your Go bin directory is on `PATH` (e.g. `export PATH="$(go env GOBIN):$(go env GOPATH)/bin:$PATH"`).
+Or `@latest` for the newest release. Ensure your Go bin directory is on `PATH` (e.g. `export PATH="$(go env GOBIN):$(go env GOPATH)/bin:$PATH"`).
 
 ### Install with mise
 
