@@ -21,7 +21,7 @@ import (
 
 // version is bumped by release-please on each release (see the annotation below)
 // and can also be overridden at build time via -ldflags "-X main.version=...".
-var version = "0.5.0" // x-release-please-version
+var version = "0.5.1" // x-release-please-version
 
 func resolveVersion() string {
 	if version != "dev" {
