@@ -1,7 +1,7 @@
 # gruntcmt
 
 <!-- x-release-please-start-version -->
-Current release: **v0.4.2**
+Current release: **v0.5.0**
 <!-- x-release-please-end-version -->
 
 `gruntcmt` is a small CLI that turns Terraform plan JSON — produced by terragrunt
@@ -20,7 +20,7 @@ gruntcmt out
 
 <!-- x-release-please-start-version -->
 ```bash
-go install github.com/dknathalage/gruntcmt/cmd/gruntcmt@v0.4.2
+go install github.com/dknathalage/gruntcmt/cmd/gruntcmt@v0.5.0
 ```
 <!-- x-release-please-end-version -->
 
