@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
-# Plan every terragrunt scenario unit under live/ into a JSON plan directory, then
-# summarize it with gruntcmt.
-#
-# Usage:
-#   ./plan-scenarios.sh
+# Plan every terragrunt scenario unit under live/ into a JSON plan directory (./out).
+# Rendering is left to the caller so the same script works locally and in CI:
+#   ./plan-scenarios.sh && gruntcmt --config gruntcmt.yaml --out /dev/stdout out   # local
+#   ./plan-scenarios.sh && gruntcmt --config gruntcmt.yaml out                     # CI: comment PR
 #
 # Applies a baseline state first, then plans at PHASE=changed so each unit
 # produces its designed change type (create/update/replace/destroy/noop).
@@ -39,5 +38,5 @@ echo "==> Planning changed phase into $outdir ..." >&2
 export PHASE=changed
 ( cd "$live" && terragrunt run --all plan --out-dir "$outdir" --json-out-dir "$outdir" 1>&2 )
 
-# Phase 3: summarize. Locally, print to stdout; in CI, drop --out to comment the PR.
-gruntcmt --config "$here/gruntcmt.yaml" --out /dev/stdout "$outdir"
+echo "==> Wrote plans to $outdir. Summarize with:" >&2
+echo "      gruntcmt --config $here/gruntcmt.yaml --out /dev/stdout $outdir" >&2

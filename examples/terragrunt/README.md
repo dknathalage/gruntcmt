@@ -32,13 +32,15 @@ mise install          # OpenTofu 1.12.3 + terragrunt 1.0.8
 
 ```bash
 ./plan-scenarios.sh
+gruntcmt --config gruntcmt.yaml --out /dev/stdout out
 ```
 
 `plan-scenarios.sh` applies a baseline state for each unit, then plans at
 `PHASE=changed` so each unit produces its designed change type. It runs
 `terragrunt run --all plan --json-out-dir out`, which writes one
-`out/<unit>/tfplan.json` per unit, then calls `gruntcmt out` — which walks the
-tree, naming each unit by its path.
+`out/<unit>/tfplan.json` per unit. `gruntcmt out` then walks the tree, naming
+each unit by its path. (The script only produces `out/`; you choose how to render
+it — `--out /dev/stdout` locally, or the default PR comment in CI.)
 
 Expected output — two documents:
 
@@ -86,3 +88,8 @@ command so gruntcmt comments the pull request instead:
 terragrunt run --all plan --json-out-dir out
 gruntcmt --config gruntcmt.yaml out       # repo/PR/commit/token auto-detected
 ```
+
+A ready-to-adapt GitHub Actions workflow is in
+[`../workflows/terragrunt-plan.yml`](../workflows/terragrunt-plan.yml); this repo
+also runs [`.github/workflows/pr-demo.yml`](../../.github/workflows/pr-demo.yml),
+which builds gruntcmt from source and comments each PR with these scenarios.

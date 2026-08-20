@@ -1,0 +1,41 @@
+# Consumer example: plan your terragrunt units on every PR and comment the result.
+# gruntcmt is a plain CLI — install it with `go install`, point it at the JSON plan
+# directory, and it auto-detects repo / PR / commit / token from the Actions
+# environment. Drop this into .github/workflows/ in your own repo and adjust paths.
+name: terragrunt-plan
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write   # required so gruntcmt can post/update the PR comment
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Install the CLI. Pin @vX.Y.Z instead of @latest for reproducible runs.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "stable"
+      - run: go install github.com/dknathalage/gruntcmt/cmd/gruntcmt@latest
+
+      # Install OpenTofu + terragrunt however you prefer (mise, asdf, direct download).
+      - uses: opentofu/setup-opentofu@v1
+      - uses: gruntwork-io/terragrunt-action@v2   # or install terragrunt directly
+
+      # Plan every unit into a JSON plan directory. terragrunt writes one
+      # <dir>/<unit>/tfplan.json per unit under --json-out-dir.
+      - name: Plan
+        run: terragrunt run --all plan --out-dir out --json-out-dir out
+        working-directory: live   # your terragrunt root
+
+      # Summarize + comment the PR. gruntcmt walks ./live/out for tfplan.json files.
+      - name: Comment PR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gruntcmt --config gruntcmt.yaml out
+        working-directory: live

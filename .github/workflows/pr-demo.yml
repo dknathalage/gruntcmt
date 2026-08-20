@@ -1,0 +1,44 @@
+# Demonstrates gruntcmt as a plain CLI in CI: builds it from the PR's own source,
+# plans the example terragrunt units into ./out, then lets gruntcmt comment this PR.
+# repo / PR / commit / token are auto-detected from the Actions environment
+# ($GITHUB_REPOSITORY, $GITHUB_REF, $GITHUB_SHA, $GITHUB_TOKEN) — no flags needed.
+name: pr-demo
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  plan-comment:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build gruntcmt from source
+        run: |
+          go build -o "$RUNNER_TEMP/bin/gruntcmt" ./cmd/gruntcmt
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: Install OpenTofu + terragrunt
+        uses: jdx/mise-action@v2
+        with:
+          install: false
+      - run: mise install
+        working-directory: examples/terragrunt
+
+      - name: Plan scenarios into ./out
+        working-directory: examples/terragrunt
+        run: ./plan-scenarios.sh
+
+      - name: Comment the PR
+        working-directory: examples/terragrunt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gruntcmt --config gruntcmt.yaml out
