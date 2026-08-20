@@ -1,3 +1,0 @@
-[tools]
-go = "1.24.13"
-"go:github.com/dknathalage/gruntcmt/cmd/gruntcmt" = "v0.1.1"
