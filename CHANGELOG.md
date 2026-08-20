@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.5.0](https://github.com/dknathalage/gruntcmt/compare/v0.4.2...v0.5.0) (2026-08-20)
+
+
+### Features
+
+* **ghctx:** add repo/pr/commit/token/scope detection ([394e7c9](https://github.com/dknathalage/gruntcmt/commit/394e7c99569927b799ded3ba1a485343603e79be))
+* **input:** add path/directory plan reader ([9e0d05e](https://github.com/dknathalage/gruntcmt/commit/9e0d05eae03337ea68cb0079db6ce2c8e2b799a3))
+* pure-CLI cutover — path args, auto-detect, --out, drop base/stdin ([a8126db](https://github.com/dknathalage/gruntcmt/commit/a8126dbba313a4cdf5c2e0d54360d79fe32d2493))
+* **ruleset:** add built-in Default ruleset ([de55cf9](https://github.com/dknathalage/gruntcmt/commit/de55cf9e546b3e3b39278407fb5e01ee19e97e6a))
+
 ## [0.4.2](https://github.com/dknathalage/gruntcmt/compare/v0.4.1...v0.4.2) (2026-08-15)
 
 
